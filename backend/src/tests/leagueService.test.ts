@@ -227,8 +227,8 @@ describe("LeagueService Competition Engine & Standings", () => {
     });
 
     it("should reject joining an ACTIVE or CANCELLED league", () => {
-      const activeLeague = { status: LeagueStatus.ACTIVE };
-      const cancelledLeague = { status: LeagueStatus.CANCELLED };
+      const activeLeague: { status: LeagueStatus } = { status: LeagueStatus.ACTIVE };
+      const cancelledLeague: { status: LeagueStatus } = { status: LeagueStatus.CANCELLED };
 
       assert.throws(
         () => {
@@ -252,12 +252,12 @@ describe("LeagueService Competition Engine & Standings", () => {
 
   describe("Lifecycle State Machine", () => {
     it("should enforce valid transition UPCOMING -> ACTIVE", () => {
-      const currentStatus = LeagueStatus.UPCOMING;
-      const targetStatus = LeagueStatus.ACTIVE;
+      const currentStatus: LeagueStatus = LeagueStatus.UPCOMING;
+      const targetStatus: LeagueStatus = LeagueStatus.ACTIVE;
       const currentMembers = 5;
       const minMembers = 2;
 
-      let nextStatus = currentStatus;
+      let nextStatus: LeagueStatus = currentStatus;
       if (targetStatus === LeagueStatus.ACTIVE) {
         if (currentStatus !== LeagueStatus.UPCOMING) {
           throw new LeagueValidationError(`Cannot transition to ACTIVE from ${currentStatus}`);
@@ -272,8 +272,8 @@ describe("LeagueService Competition Engine & Standings", () => {
     });
 
     it("should reject UPCOMING -> ACTIVE if minimum participants not met", () => {
-      const currentStatus = LeagueStatus.UPCOMING;
-      const targetStatus = LeagueStatus.ACTIVE;
+      const currentStatus: LeagueStatus = LeagueStatus.UPCOMING;
+      const targetStatus: LeagueStatus = LeagueStatus.ACTIVE;
       const currentMembers = 1;
       const minMembers = 2;
 
@@ -290,23 +290,19 @@ describe("LeagueService Competition Engine & Standings", () => {
     });
 
     it("should reject transitions from terminal states (COMPLETED, CANCELLED)", () => {
+      const checkTerminal = (status: LeagueStatus) => {
+        if (status === LeagueStatus.COMPLETED || status === LeagueStatus.CANCELLED) {
+          throw new LeagueValidationError(`Cannot transition from terminal state ${status}`);
+        }
+      };
+
       assert.throws(
-        () => {
-          const currentStatus = LeagueStatus.COMPLETED;
-          if (currentStatus === LeagueStatus.COMPLETED || currentStatus === LeagueStatus.CANCELLED) {
-            throw new LeagueValidationError(`Cannot transition from terminal state ${currentStatus}`);
-          }
-        },
+        () => checkTerminal(LeagueStatus.COMPLETED),
         LeagueValidationError
       );
 
       assert.throws(
-        () => {
-          const currentStatus = LeagueStatus.CANCELLED;
-          if (currentStatus === LeagueStatus.COMPLETED || currentStatus === LeagueStatus.CANCELLED) {
-            throw new LeagueValidationError(`Cannot transition from terminal state ${currentStatus}`);
-          }
-        },
+        () => checkTerminal(LeagueStatus.CANCELLED),
         LeagueValidationError
       );
     });
