@@ -12,36 +12,23 @@
 // Enums — must match the Prisma schema exactly
 // ============================================================
 
-export enum Position {
-  GKP = "GKP",
-  DEF = "DEF",
-  MID = "MID",
-  FWD = "FWD",
-}
+import {
+  Position,
+  LeagueStatus,
+  ScoringType,
+  TransactionType,
+  TransactionStatus,
+} from "@prisma/client";
 
-export enum LeagueStatus {
-  DRAFT = "DRAFT",
-  ACTIVE = "ACTIVE",
-  COMPLETED = "COMPLETED",
-}
+export {
+  Position,
+  LeagueStatus,
+  ScoringType,
+  TransactionType,
+  TransactionStatus,
+};
 
-export enum ScoringType {
-  CLASSIC = "CLASSIC",
-  HEAD_TO_HEAD = "HEAD_TO_HEAD",
-}
 
-export enum TransactionType {
-  DEPOSIT = "DEPOSIT",
-  WITHDRAWAL = "WITHDRAWAL",
-  ENTRY_FEE = "ENTRY_FEE",
-  PRIZE = "PRIZE",
-}
-
-export enum TransactionStatus {
-  PENDING = "PENDING",
-  CONFIRMED = "CONFIRMED",
-  FAILED = "FAILED",
-}
 
 // ============================================================
 // Squad composition constants
