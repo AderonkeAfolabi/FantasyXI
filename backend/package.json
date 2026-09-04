@@ -20,6 +20,7 @@
   "type": "module",
   "dependencies": {
     "@prisma/client": "^7.10.0",
+    "@stellar/stellar-sdk": "^17.0.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
