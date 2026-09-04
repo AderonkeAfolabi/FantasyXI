@@ -15,6 +15,7 @@
 import {
   Position,
   LeagueStatus,
+  MembershipStatus,
   ScoringType,
   TransactionType,
   TransactionStatus,
@@ -23,10 +24,12 @@ import {
 export {
   Position,
   LeagueStatus,
+  MembershipStatus,
   ScoringType,
   TransactionType,
   TransactionStatus,
 };
+
 
 
 
@@ -159,4 +162,54 @@ export interface PlayerFilterQuery {
   page?: number;
   limit?: number;
 }
+
+// ============================================================
+// League & Competition Types
+// ============================================================
+
+export interface CreateLeagueInput {
+  name: string;
+  description?: string;
+  entryFee: number; // in USDC, >= 0
+  maxMembers?: number; // default 20
+  minMembers?: number; // default 2
+  startGameweekId: number;
+  endGameweekId: number;
+  squadId: string; // Creator's initial squad
+}
+
+export interface JoinLeagueInput {
+  squadId: string;
+}
+
+export interface LeagueStandingsEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  squadId: string;
+  squadName: string;
+  membershipStatus: MembershipStatus;
+  totalPoints: number;
+  bestGameweekPoints: number;
+  gameweekScores: Array<{
+    gameweekId: number;
+    gameweekName: string;
+    points: number;
+  }>;
+  joinedAt: Date;
+}
+
+export interface PrizeDistribution {
+  participantCount: number;
+  entryFee: number;
+  grossTotal: number;
+  platformFee: number;
+  prizePool: number;
+  prizes: {
+    first: number;
+    second: number;
+    third: number;
+  };
+}
+
 

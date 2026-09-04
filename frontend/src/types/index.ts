@@ -21,9 +21,17 @@ export enum Position {
 }
 
 export enum LeagueStatus {
-  DRAFT = "DRAFT",
+  UPCOMING = "UPCOMING",
   ACTIVE = "ACTIVE",
   COMPLETED = "COMPLETED",
+  CANCELLED = "CANCELLED",
+}
+
+export enum MembershipStatus {
+  PENDING = "PENDING",
+  ACTIVE = "ACTIVE",
+  CANCELLED = "CANCELLED",
+  REFUNDED = "REFUNDED",
 }
 
 export enum ScoringType {
@@ -161,14 +169,16 @@ export interface League {
   creatorId: string;
   inviteCode: string;
   maxMembers: number;
+  minMembers: number;
+  currentMembers: number;
   entryFee: number;
   prizePool: number;
   status: LeagueStatus;
   scoringType: ScoringType;
-  startGameweekId: number | null;
-  endGameweekId: number | null;
-  memberCount?: number;
+  startGameweekId: number;
+  endGameweekId: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface LeagueMember {
@@ -178,10 +188,41 @@ export interface LeagueMember {
   user?: User;
   squadId: string;
   squad?: Squad;
+  status: MembershipStatus;
   hasPaid: boolean;
   rank: number | null;
   totalPoints: number;
   joinedAt: string;
+}
+
+export interface LeagueStandingsEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  squadId: string;
+  squadName: string;
+  membershipStatus: MembershipStatus;
+  totalPoints: number;
+  bestGameweekPoints: number;
+  gameweekScores: Array<{
+    gameweekId: number;
+    gameweekName: string;
+    points: number;
+  }>;
+  joinedAt: string;
+}
+
+export interface PrizeDistribution {
+  participantCount: number;
+  entryFee: number;
+  grossTotal: number;
+  platformFee: number;
+  prizePool: number;
+  prizes: {
+    first: number;
+    second: number;
+    third: number;
+  };
 }
 
 export interface Transaction {

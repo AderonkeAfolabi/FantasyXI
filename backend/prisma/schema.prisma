@@ -23,9 +23,18 @@ enum Position {
 
 /// Current status of a league
 enum LeagueStatus {
-  DRAFT
+  UPCOMING
   ACTIVE
   COMPLETED
+  CANCELLED
+}
+
+/// Member state within a competition
+enum MembershipStatus {
+  PENDING
+  ACTIVE
+  CANCELLED
+  REFUNDED
 }
 
 /// How a league is scored
@@ -250,26 +259,29 @@ model SquadPlayer {
 
 /// A fantasy league created by a user.
 model League {
-  id               String       @id @default(uuid())
-  name             String
-  description      String?
-  creatorId        String       @map("creator_id")
-  inviteCode       String       @unique @map("invite_code")
-  maxMembers       Int          @default(20) @map("max_members")
-  entryFee         Decimal      @default(0) @map("entry_fee") @db.Decimal(10, 2)
-  prizePool        Decimal      @default(0) @map("prize_pool") @db.Decimal(10, 2)
-  status           LeagueStatus @default(DRAFT)
-  scoringType      ScoringType  @default(CLASSIC) @map("scoring_type")
-  startGameweekId  Int?         @map("start_gameweek_id")
-  endGameweekId    Int?         @map("end_gameweek_id")
-  createdAt        DateTime     @default(now()) @map("created_at")
+  id              String       @id @default(uuid())
+  name            String
+  description     String?
+  creatorId       String       @map("creator_id")
+  inviteCode      String       @unique @map("invite_code")
+  maxMembers      Int          @default(20) @map("max_members")
+  minMembers      Int          @default(2) @map("min_members")
+  currentMembers  Int          @default(0) @map("current_members")
+  entryFee        Decimal      @default(0) @map("entry_fee") @db.Decimal(10, 2)
+  prizePool       Decimal      @default(0) @map("prize_pool") @db.Decimal(10, 2)
+  status          LeagueStatus @default(UPCOMING)
+  scoringType     ScoringType  @default(CLASSIC) @map("scoring_type")
+  startGameweekId Int          @map("start_gameweek_id")
+  endGameweekId   Int          @map("end_gameweek_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
 
   // Relations
-  creator        User           @relation("LeagueCreator", fields: [creatorId], references: [id])
-  startGameweek  Gameweek?      @relation("LeagueStartGW", fields: [startGameweekId], references: [id])
-  endGameweek    Gameweek?      @relation("LeagueEndGW", fields: [endGameweekId], references: [id])
-  members        LeagueMember[]
-  transactions   Transaction[]
+  creator       User           @relation("LeagueCreator", fields: [creatorId], references: [id])
+  startGameweek Gameweek       @relation("LeagueStartGW", fields: [startGameweekId], references: [id])
+  endGameweek   Gameweek       @relation("LeagueEndGW", fields: [endGameweekId], references: [id])
+  members       LeagueMember[]
+  transactions  Transaction[]
 
   @@map("leagues")
 }
@@ -277,14 +289,15 @@ model League {
 /// A user's membership in a league — links user, squad, and league together.
 /// Like a Laravel pivot table: `league_user` with extra columns.
 model LeagueMember {
-  id          String   @id @default(uuid())
-  leagueId    String   @map("league_id")
-  userId      String   @map("user_id")
-  squadId     String   @map("squad_id")
-  joinedAt    DateTime @default(now()) @map("joined_at")
-  hasPaid     Boolean  @default(false) @map("has_paid")
+  id          String           @id @default(uuid())
+  leagueId    String           @map("league_id")
+  userId      String           @map("user_id")
+  squadId     String           @map("squad_id")
+  status      MembershipStatus @default(PENDING)
+  joinedAt    DateTime         @default(now()) @map("joined_at")
+  hasPaid     Boolean          @default(false) @map("has_paid")
   rank        Int?
-  totalPoints Int      @default(0) @map("total_points")
+  totalPoints Int              @default(0) @map("total_points")
 
   // Relations
   league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
