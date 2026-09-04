@@ -1,0 +1,563 @@
+/**
+ * Financial Service — Escrow State Machine & Financial Accounting
+ *
+ * Laravel analogy: Like an EscrowManager service that handles payment intents,
+ * payment confirmations, idempotency, prize settlement plans, and ledger reconciliation.
+ *
+ * Separation of concerns:
+ * - Does NOT perform HTTP requests to Stellar directly (delegates to StellarService).
+ * - Manages database transitions between PENDING -> PAYMENT_INITIATED -> PAYMENT_SUBMITTED -> PAYMENT_CONFIRMED.
+ * - Enforces zero lost cents via PrizeService.
+ */
+
+import { prisma } from "../../config/db.js";
+import { stellarConfig } from "../../config/stellar.js";
+import { StellarService, stellarService } from "./stellarService.js";
+import { PrizeService } from "../league/prizeService.js";
+import {
+  LeagueStatus,
+  MembershipStatus,
+  PaymentStatus,
+  TransactionType,
+  TransactionStatus,
+  PaymentRequirement,
+  PaymentSubmissionInput,
+  PaymentVerificationResult,
+  SettlementPlan,
+  SettlementWinner,
+  ReconciliationReport,
+} from "../../types/index.js";
+
+export class FinancialValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FinancialValidationError";
+  }
+}
+
+export class FinancialNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FinancialNotFoundError";
+  }
+}
+
+export class FinancialForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FinancialForbiddenError";
+  }
+}
+
+export class FinancialConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FinancialConflictError";
+  }
+}
+
+export class FinancialService {
+  constructor(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private readonly db: any = prisma,
+    private readonly stellar: StellarService = stellarService
+  ) {}
+
+  /**
+   * Generates a deterministic Stellar text memo (max 28 ASCII bytes)
+   * Format: FXI:<8-char-league-id>:<8-char-user-id>
+   */
+  public formatPaymentMemo(leagueId: string, userId: string): string {
+    const cleanLeague = leagueId
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .slice(0, 8)
+      .toUpperCase();
+    const cleanUser = userId
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .slice(0, 8)
+      .toUpperCase();
+    return `FXI:${cleanLeague}:${cleanUser}`;
+  }
+
+  /**
+   * Initiates payment for a league entry fee.
+   * Returns deterministic payment instructions (destination, asset, amount, memo).
+   *
+   * If the league is free (entryFee === 0), marks the membership as PAYMENT_CONFIRMED
+   * and promotes it directly to ACTIVE.
+   */
+  public async createPaymentRequirement(
+    userId: string,
+    leagueId: string,
+    squadId: string
+  ): Promise<PaymentRequirement> {
+    const league = await this.db.league.findUnique({
+      where: { id: leagueId },
+    });
+
+    if (!league) {
+      throw new FinancialNotFoundError(`League with ID ${leagueId} was not found`);
+    }
+
+    if (league.status !== LeagueStatus.UPCOMING) {
+      throw new FinancialValidationError(
+        `Cannot initiate payment for a league in '${league.status}' status. Only UPCOMING leagues accept entry fees.`
+      );
+    }
+
+    // Verify squad belongs to user
+    const squad = await this.db.squad.findUnique({
+      where: { id: squadId },
+    });
+    if (!squad || squad.userId !== userId) {
+      throw new FinancialValidationError(
+        "The selected squad does not belong to the user"
+      );
+    }
+
+    const isFree = league.entryFee === 0;
+
+    let member = await this.db.leagueMember.findUnique({
+      where: {
+        leagueId_userId: {
+          leagueId,
+          userId,
+        },
+      },
+    });
+
+    if (isFree) {
+      if (!member) {
+        member = await this.db.leagueMember.create({
+          data: {
+            leagueId,
+            userId,
+            squadId,
+            status: MembershipStatus.ACTIVE,
+            paymentStatus: PaymentStatus.PAYMENT_CONFIRMED,
+          },
+        });
+      } else if (member.status !== MembershipStatus.ACTIVE) {
+        member = await this.db.leagueMember.update({
+          where: { id: member.id },
+          data: {
+            status: MembershipStatus.ACTIVE,
+            paymentStatus: PaymentStatus.PAYMENT_CONFIRMED,
+            squadId,
+          },
+        });
+      }
+    } else {
+      if (!member) {
+        member = await this.db.leagueMember.create({
+          data: {
+            leagueId,
+            userId,
+            squadId,
+            status: MembershipStatus.PENDING,
+            paymentStatus: PaymentStatus.PAYMENT_INITIATED,
+          },
+        });
+      } else if (
+        member.paymentStatus === PaymentStatus.PENDING ||
+        member.paymentStatus === PaymentStatus.PAYMENT_FAILED
+      ) {
+        member = await this.db.leagueMember.update({
+          where: { id: member.id },
+          data: {
+            paymentStatus: PaymentStatus.PAYMENT_INITIATED,
+            squadId,
+          },
+        });
+      }
+    }
+
+    const memo = this.formatPaymentMemo(leagueId, userId);
+
+    return {
+      leagueId: league.id,
+      leagueName: league.name,
+      entryFee: league.entryFee,
+      assetCode: stellarConfig.usdcAssetCode,
+      assetIssuer: stellarConfig.usdcIssuer,
+      destinationAddress:
+        stellarConfig.escrowContractId || stellarConfig.treasuryAddress,
+      memo,
+      paymentStatus: member.paymentStatus,
+    };
+  }
+
+  /**
+   * Submits a Stellar transaction hash to record payment submission.
+   * Transitions paymentStatus to PAYMENT_SUBMITTED and records Transaction record.
+   */
+  public async submitPayment(
+    userId: string,
+    leagueId: string,
+    input: PaymentSubmissionInput
+  ): Promise<{ member: any; transaction: any }> {
+    const { stellarTxHash, stellarAddress } = input;
+
+    if (!this.stellar.isValidTransactionHash(stellarTxHash)) {
+      throw new FinancialValidationError(
+        "Invalid transaction hash format. Expected 64-character hex string."
+      );
+    }
+
+    if (!this.stellar.isValidStellarAddress(stellarAddress)) {
+      throw new FinancialValidationError("Invalid Stellar wallet address");
+    }
+
+    const member = await this.db.leagueMember.findUnique({
+      where: {
+        leagueId_userId: {
+          leagueId,
+          userId,
+        },
+      },
+      include: {
+        league: true,
+      },
+    });
+
+    if (!member) {
+      throw new FinancialNotFoundError(
+        "You must initiate league join before submitting payment"
+      );
+    }
+
+    if (member.paymentStatus === PaymentStatus.PAYMENT_CONFIRMED) {
+      return { member, transaction: null };
+    }
+
+    // Check if txHash has already been registered
+    const existingTx = await this.db.transaction.findUnique({
+      where: { stellarTxHash },
+    });
+
+    if (existingTx && existingTx.memberId && existingTx.memberId !== member.id) {
+      throw new FinancialConflictError(
+        "This transaction hash has already been registered for another participant"
+      );
+    }
+
+    const updatedMember = await this.db.leagueMember.update({
+      where: { id: member.id },
+      data: {
+        paymentStatus: PaymentStatus.PAYMENT_SUBMITTED,
+        stellarAddress,
+      },
+    });
+
+    const transaction = existingTx
+      ? await this.db.transaction.update({
+          where: { id: existingTx.id },
+          data: {
+            status: TransactionStatus.SUBMITTED,
+            memberId: member.id,
+          },
+        })
+      : await this.db.transaction.create({
+          data: {
+            type: TransactionType.ENTRY_FEE,
+            status: TransactionStatus.SUBMITTED,
+            amount: member.league.entryFee,
+            asset: stellarConfig.usdcAssetCode,
+            assetIssuer: stellarConfig.usdcIssuer,
+            stellarTxHash,
+            memo: this.formatPaymentMemo(leagueId, userId),
+            memberId: member.id,
+            leagueId: member.leagueId,
+          },
+        });
+
+    return { member: updatedMember, transaction };
+  }
+
+  /**
+   * Verifies on-chain payment against Stellar Horizon.
+   * If verified, transitions paymentStatus -> PAYMENT_CONFIRMED,
+   * Transaction.status -> CONFIRMED, and promotes LeagueMember.status -> ACTIVE.
+   */
+  public async verifyAndConfirmPayment(
+    userId: string,
+    leagueId: string,
+    stellarTxHash: string
+  ): Promise<PaymentVerificationResult> {
+    const member = await this.db.leagueMember.findUnique({
+      where: {
+        leagueId_userId: {
+          leagueId,
+          userId,
+        },
+      },
+      include: {
+        league: true,
+      },
+    });
+
+    if (!member) {
+      throw new FinancialNotFoundError("Membership record not found");
+    }
+
+    // Idempotency: if already confirmed and active, return success immediately
+    if (
+      member.paymentStatus === PaymentStatus.PAYMENT_CONFIRMED &&
+      member.status === MembershipStatus.ACTIVE
+    ) {
+      return {
+        success: true,
+        txHash: stellarTxHash,
+        amount: member.league.entryFee,
+        assetCode: stellarConfig.usdcAssetCode,
+      };
+    }
+
+    const expectedMemo = this.formatPaymentMemo(leagueId, userId);
+    const expectedDestination =
+      stellarConfig.escrowContractId || stellarConfig.treasuryAddress;
+
+    const verification = await this.stellar.verifyPaymentTransaction({
+      txHash: stellarTxHash,
+      expectedDestination,
+      expectedAmount: member.league.entryFee,
+      expectedMemo,
+      expectedSender: member.stellarAddress || undefined,
+    });
+
+    if (!verification.success) {
+      await this.db.leagueMember.update({
+        where: { id: member.id },
+        data: {
+          paymentStatus: PaymentStatus.PAYMENT_FAILED,
+        },
+      });
+
+      await this.db.transaction.updateMany({
+        where: { stellarTxHash },
+        data: {
+          status: TransactionStatus.FAILED,
+          errorMessage: verification.error,
+        },
+      });
+
+      return verification;
+    }
+
+    // Atomically confirm payment and activate member
+    await this.db.$transaction([
+      this.db.leagueMember.update({
+        where: { id: member.id },
+        data: {
+          paymentStatus: PaymentStatus.PAYMENT_CONFIRMED,
+          status: MembershipStatus.ACTIVE,
+        },
+      }),
+      this.db.transaction.updateMany({
+        where: { stellarTxHash },
+        data: {
+          status: TransactionStatus.CONFIRMED,
+          ledgerSeq: verification.ledgerSeq,
+          confirmedAt: verification.confirmedAt || new Date(),
+        },
+      }),
+    ]);
+
+    return verification;
+  }
+
+  /**
+   * Prepares a deterministic settlement plan for a completed league.
+   * Calculates gross total, platform fee, and 60/30/10 prize amounts using PrizeService.
+   */
+  public async prepareSettlement(
+    leagueId: string,
+    requesterUserId: string
+  ): Promise<SettlementPlan> {
+    const league = await this.db.league.findUnique({
+      where: { id: leagueId },
+      include: {
+        members: {
+          include: {
+            user: true,
+            squad: true,
+          },
+        },
+      },
+    });
+
+    if (!league) {
+      throw new FinancialNotFoundError(`League ${leagueId} not found`);
+    }
+
+    if (league.creatorId !== requesterUserId) {
+      throw new FinancialForbiddenError(
+        "Only the league creator or administrator can prepare settlements"
+      );
+    }
+
+    if (league.status === LeagueStatus.CANCELLED) {
+      return {
+        leagueId: league.id,
+        leagueName: league.name,
+        status: league.status,
+        totalParticipants: 0,
+        entryFee: league.entryFee,
+        grossPool: 0,
+        platformFee: 0,
+        netPrizePool: 0,
+        winners: [],
+        canSettle: false,
+        unsettledReason: "League was cancelled. Funds must be refunded, not settled.",
+      };
+    }
+
+    // Filter paid active participants
+    const paidMembers = league.members.filter(
+      (m: any) =>
+        m.status === MembershipStatus.ACTIVE &&
+        (league.entryFee === 0 ||
+          m.paymentStatus === PaymentStatus.PAYMENT_CONFIRMED)
+    );
+
+    if (paidMembers.length === 0) {
+      return {
+        leagueId: league.id,
+        leagueName: league.name,
+        status: league.status,
+        totalParticipants: 0,
+        entryFee: league.entryFee,
+        grossPool: 0,
+        platformFee: 0,
+        netPrizePool: 0,
+        winners: [],
+        canSettle: false,
+        unsettledReason: "No confirmed active participants found in this league.",
+      };
+    }
+
+    // Calculate deterministic prize pool
+    const distribution = PrizeService.calculatePrizeDistribution(
+      paidMembers.length,
+      league.entryFee
+    );
+
+    // Sort participants deterministically by points descending, then join timestamp
+    const sortedMembers = [...paidMembers].sort((a: any, b: any) => {
+      const aPoints = a.squad?.totalPoints || 0;
+      const bPoints = b.squad?.totalPoints || 0;
+      if (bPoints !== aPoints) return bPoints - aPoints;
+      return new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+    });
+
+    const winners: SettlementWinner[] = [];
+
+    // Winner 1 (60% or 70% if 2 players)
+    if (sortedMembers[0] && distribution.prizes.first > 0) {
+      winners.push({
+        rank: 1,
+        userId: sortedMembers[0].userId,
+        username: sortedMembers[0].user?.username || "Unknown",
+        stellarAddress: sortedMembers[0].stellarAddress || "PENDING_WALLET_LINK",
+        squadName: sortedMembers[0].squad?.name || "Squad 1",
+        totalPoints: sortedMembers[0].squad?.totalPoints || 0,
+        prizeAmount: distribution.prizes.first,
+      });
+    }
+
+    // Winner 2 (30%)
+    if (sortedMembers[1] && distribution.prizes.second > 0) {
+      winners.push({
+        rank: 2,
+        userId: sortedMembers[1].userId,
+        username: sortedMembers[1].user?.username || "Unknown",
+        stellarAddress: sortedMembers[1].stellarAddress || "PENDING_WALLET_LINK",
+        squadName: sortedMembers[1].squad?.name || "Squad 2",
+        totalPoints: sortedMembers[1].squad?.totalPoints || 0,
+        prizeAmount: distribution.prizes.second,
+      });
+    }
+
+    // Winner 3 (10% if 3+ players)
+    if (sortedMembers[2] && distribution.prizes.third > 0) {
+      winners.push({
+        rank: 3,
+        userId: sortedMembers[2].userId,
+        username: sortedMembers[2].user?.username || "Unknown",
+        stellarAddress: sortedMembers[2].stellarAddress || "PENDING_WALLET_LINK",
+        squadName: sortedMembers[2].squad?.name || "Squad 3",
+        totalPoints: sortedMembers[2].squad?.totalPoints || 0,
+        prizeAmount: distribution.prizes.third,
+      });
+    }
+
+    return {
+      leagueId: league.id,
+      leagueName: league.name,
+      status: league.status,
+      totalParticipants: paidMembers.length,
+      entryFee: league.entryFee,
+      grossPool: distribution.grossTotal,
+      platformFee: distribution.platformFee,
+      netPrizePool: distribution.prizePool,
+      winners,
+      canSettle: true,
+    };
+  }
+
+  /**
+   * Reconciles application ledger with verified transactions.
+   * Computes expected gross, confirmed deposits, and identifies any discrepancy.
+   */
+  public async reconcileLeague(leagueId: string): Promise<ReconciliationReport> {
+    const league = await this.db.league.findUnique({
+      where: { id: leagueId },
+      include: {
+        members: true,
+        transactions: true,
+      },
+    });
+
+    if (!league) {
+      throw new FinancialNotFoundError(`League ${leagueId} not found`);
+    }
+
+    const activeMembers = league.members.filter(
+      (m: any) => m.status === MembershipStatus.ACTIVE
+    );
+
+    const confirmedTx = (league.transactions || []).filter(
+      (tx: any) =>
+        tx.type === TransactionType.ENTRY_FEE &&
+        tx.status === TransactionStatus.CONFIRMED
+    );
+
+    const expectedGross = activeMembers.length * league.entryFee;
+    const confirmedTotal = confirmedTx.reduce(
+      (sum: number, tx: any) => sum + tx.amount,
+      0
+    );
+    const discrepancy = parseFloat((expectedGross - confirmedTotal).toFixed(4));
+
+    return {
+      leagueId: league.id,
+      leagueName: league.name,
+      activeMemberCount: activeMembers.length,
+      entryFee: league.entryFee,
+      expectedGross,
+      confirmedDepositsTotal: confirmedTotal,
+      discrepancy,
+      isBalanced: Math.abs(discrepancy) < 0.0001,
+      transactions: (league.transactions || []).map((tx: any) => ({
+        id: tx.id,
+        type: tx.type,
+        status: tx.status,
+        amount: tx.amount,
+        stellarTxHash: tx.stellarTxHash,
+        confirmedAt: tx.confirmedAt,
+      })),
+    };
+  }
+}
+
+export const financialService = new FinancialService();
