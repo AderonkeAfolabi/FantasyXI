@@ -30,6 +30,9 @@ export class LeagueForbiddenError extends Error {
 }
 
 export class LeagueService {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(private readonly db: any = prisma) {}
+
   /**
    * Generates a unique, URL-safe 6-character alphanumeric invite code.
    */
@@ -460,7 +463,7 @@ export class LeagueService {
    * Cancels an upcoming league. Only the creator is authorized to do so.
    */
   public async cancelLeague(leagueId: string, requesterUserId: string) {
-    const league = await prisma.league.findUnique({
+    const league = await this.db.league.findUnique({
       where: { id: leagueId },
     });
 

@@ -31,9 +31,12 @@ export function getJwtExpiresIn(): string {
   return process.env.JWT_EXPIRES_IN || "7d";
 }
 
-import { JwtPayload } from "../types/index.js";
-
-export { JwtPayload };
+export interface JwtPayload {
+  userId: string;
+  email?: string;
+  username?: string;
+  [key: string]: unknown;
+}
 
 /**
  * Signs a minimal JWT payload.
