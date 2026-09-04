@@ -18,6 +18,8 @@ app.use(
 );
 app.use(express.json());
 
+import apiV1Router from "./routes/index.js";
+
 // ============================================================
 // Routes
 // ============================================================
@@ -25,7 +27,7 @@ app.use(express.json());
 app.get("/", (_req: Request, res: Response) => {
   res.json({
     name: "FantasyXI API",
-    version: "0.1.0",
+    version: "0.2.0",
     status: "running",
   });
 });
@@ -38,11 +40,10 @@ app.get("/api/health", (_req: Request, res: Response) => {
   });
 });
 
-// Future route mounting will go here:
-// app.use("/api/auth", authRoutes);
-// app.use("/api/players", playerRoutes);
-// app.use("/api/squads", squadRoutes);
-// app.use("/api/leagues", leagueRoutes);
+// API v1 Routes
+app.use("/api/v1", apiV1Router);
+app.use("/api", apiV1Router);
+
 
 // ============================================================
 // Global error handler

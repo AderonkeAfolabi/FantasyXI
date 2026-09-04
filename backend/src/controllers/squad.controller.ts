@@ -1,0 +1,147 @@
+import { Request, Response, NextFunction } from "express";
+import { squadService } from "../services/squad/squadService.js";
+import {
+  SquadValidationError,
+  SquadLockedError,
+} from "../services/squad/squadValidator.js";
+import { scoringService } from "../services/scoring/scoringService.js";
+
+/**
+ * Squad Controller.
+ *
+ * Handles creation, updates, validation, and scoring calculation for user fantasy squads.
+ *
+ * Laravel equivalent: Like app/Http/Controllers/SquadController.php using
+ * dedicated FormRequests and SquadService.
+ */
+
+export async function createSquad(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const squad = await squadService.createSquad(req.body);
+    res.status(201).json({
+      success: true,
+      message: "Fantasy squad created successfully",
+      data: squad,
+    });
+  } catch (error) {
+    if (error instanceof SquadValidationError) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+        errors: { squad: error.errors },
+      });
+      return;
+    }
+    next(error);
+  }
+}
+
+export async function getSquadById(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const squad = await squadService.getSquad(id as string);
+    res.json({
+      success: true,
+      data: squad,
+    });
+  } catch (error) {
+    if (error instanceof SquadValidationError) {
+      res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+}
+
+export async function updateSquad(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const squad = await squadService.updateSquad(id as string, req.body);
+    res.json({
+      success: true,
+      message: "Squad updated successfully",
+      data: squad,
+    });
+  } catch (error) {
+    if (error instanceof SquadLockedError) {
+      res.status(403).json({
+        success: false,
+        message: error.message,
+        deadline: error.deadline,
+      });
+      return;
+    }
+    if (error instanceof SquadValidationError) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+        errors: { squad: error.errors },
+      });
+      return;
+    }
+    next(error);
+  }
+}
+
+export async function getUserSquads(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { userId } = req.params;
+    const squads = await squadService.getUserSquads(userId as string);
+    res.json({
+      success: true,
+      data: squads,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function calculateGameweekScore(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id, gameweekId } = req.params;
+    const parsedGw = parseInt(gameweekId as string, 10);
+    if (isNaN(parsedGw)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid gameweek ID",
+      });
+      return;
+    }
+
+    const result = await scoringService.calculateAndPersistSquadScore(
+      id as string,
+      parsedGw
+    );
+
+    res.json({
+      success: true,
+      message: `Score calculated for gameweek ${parsedGw}`,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
