@@ -122,3 +122,54 @@ export interface ApiSuccessResponse<T = unknown> {
   data: T;
   message?: string;
 }
+
+// ============================================================
+// Fixture & Fantasy Squad Input Types
+// ============================================================
+
+export interface FixtureData {
+  id: number;
+  fplId: number;
+  gameweekId: number | null;
+  homeTeamId: number;
+  awayTeamId: number;
+  kickoffTime: string | null;
+  started: boolean;
+  finished: boolean;
+  homeScore: number | null;
+  awayScore: number | null;
+  minutes: number;
+}
+
+export interface SquadPlayerSelection {
+  playerId: number;
+  isStarter: boolean;
+  isCaptain: boolean;
+  isViceCaptain: boolean;
+  positionOrder: number; // 1 to 15
+}
+
+export interface CreateSquadInput {
+  name: string;
+  userId: string;
+  players: SquadPlayerSelection[];
+}
+
+export interface UpdateSquadInput {
+  name?: string;
+  players: SquadPlayerSelection[];
+}
+
+export interface PlayerFilterQuery {
+  search?: string;
+  position?: Position;
+  teamId?: number;
+  minPrice?: number;
+  maxPrice?: number;
+  isAvailable?: boolean;
+  sortBy?: "price" | "totalPoints" | "goalsScored" | "assists" | "form";
+  sortOrder?: "asc" | "desc";
+  page?: number;
+  limit?: number;
+}
+

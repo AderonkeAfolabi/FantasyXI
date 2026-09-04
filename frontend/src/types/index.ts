@@ -61,6 +61,9 @@ export interface Team {
   name: string;
   shortName: string;
   logoUrl: string | null;
+  strength?: number | null;
+  strengthOverallHome?: number | null;
+  strengthOverallAway?: number | null;
 }
 
 export interface Player {
@@ -78,8 +81,30 @@ export interface Player {
   goalsScored: number;
   assists: number;
   cleanSheets: number;
+  form?: number | null;
+  status?: string | null;
+  news?: string | null;
+  chanceOfPlayingNextRound?: number | null;
+  selectedByPercent?: number | null;
   photoUrl: string | null;
   isAvailable: boolean;
+}
+
+export interface Fixture {
+  id: number;
+  fplId: number;
+  gameweekId: number | null;
+  gameweek?: Gameweek;
+  homeTeamId: number;
+  homeTeam?: Team;
+  awayTeamId: number;
+  awayTeam?: Team;
+  kickoffTime: string | null;
+  started: boolean;
+  finished: boolean;
+  homeScore: number | null;
+  awayScore: number | null;
+  minutes: number;
 }
 
 export interface Gameweek {

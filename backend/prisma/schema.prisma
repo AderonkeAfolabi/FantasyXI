@@ -89,14 +89,23 @@ model Wallet {
 
 /// A Premier League club. Data synced from the FPL API.
 model Team {
-  id        Int    @id @default(autoincrement())
-  fplId     Int    @unique @map("fpl_id")
-  name      String
-  shortName String @map("short_name")
-  logoUrl   String? @map("logo_url")
+  id                  Int       @id @default(autoincrement())
+  fplId               Int       @unique @map("fpl_id")
+  name                String
+  shortName           String    @map("short_name")
+  logoUrl             String?   @map("logo_url")
+  strength            Int?
+  strengthOverallHome Int?      @map("strength_overall_home")
+  strengthOverallAway Int?      @map("strength_overall_away")
+  strengthAttackHome  Int?      @map("strength_attack_home")
+  strengthAttackAway  Int?      @map("strength_attack_away")
+  strengthDefenceHome Int?      @map("strength_defence_home")
+  strengthDefenceAway Int?      @map("strength_defence_away")
 
   // Relations
-  players Player[]
+  players      Player[]
+  homeFixtures Fixture[] @relation("HomeFixtures")
+  awayFixtures Fixture[] @relation("AwayFixtures")
 
   @@map("teams")
 }
@@ -104,27 +113,32 @@ model Team {
 /// A real Premier League footballer. Data synced from the FPL API.
 /// Like an Eloquent model with `$fillable` fields populated from an external API.
 model Player {
-  id             Int      @id @default(autoincrement())
-  fplId          Int      @unique @map("fpl_id")
-  firstName      String   @map("first_name")
-  lastName       String   @map("last_name")
-  displayName    String   @map("display_name")
-  position       Position
-  teamId         Int      @map("team_id")
-  price          Decimal  @db.Decimal(4, 1)
-  totalPoints    Int      @default(0) @map("total_points")
-  minutesPlayed  Int      @default(0) @map("minutes_played")
-  goalsScored    Int      @default(0) @map("goals_scored")
-  assists        Int      @default(0)
-  cleanSheets    Int      @default(0) @map("clean_sheets")
-  photoUrl       String?  @map("photo_url")
-  isAvailable    Boolean  @default(true) @map("is_available")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id                       Int      @id @default(autoincrement())
+  fplId                    Int      @unique @map("fpl_id")
+  firstName                String   @map("first_name")
+  lastName                 String   @map("last_name")
+  displayName              String   @map("display_name")
+  position                 Position
+  teamId                   Int      @map("team_id")
+  price                    Decimal  @db.Decimal(4, 1)
+  totalPoints              Int      @default(0) @map("total_points")
+  minutesPlayed            Int      @default(0) @map("minutes_played")
+  goalsScored              Int      @default(0) @map("goals_scored")
+  assists                  Int      @default(0)
+  cleanSheets              Int      @default(0) @map("clean_sheets")
+  form                     Decimal? @db.Decimal(4, 1)
+  status                   String?  @default("a")
+  news                     String?
+  chanceOfPlayingNextRound Int?     @map("chance_of_playing_next_round")
+  selectedByPercent        Decimal? @map("selected_by_percent") @db.Decimal(5, 1)
+  photoUrl                 String?  @map("photo_url")
+  isAvailable              Boolean  @default(true) @map("is_available")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   // Relations
-  team           Team               @relation(fields: [teamId], references: [id])
-  squadPlayers   SquadPlayer[]
-  gameweekStats  PlayerGameweekStats[]
+  team          Team                  @relation(fields: [teamId], references: [id])
+  squadPlayers  SquadPlayer[]
+  gameweekStats PlayerGameweekStats[]
 
   @@map("players")
 }
@@ -140,12 +154,35 @@ model Gameweek {
   season     String
 
   // Relations
-  playerStats      PlayerGameweekStats[]
-  squadScores      SquadGameweekScore[]
-  leaguesStarting  League[] @relation("LeagueStartGW")
-  leaguesEnding    League[] @relation("LeagueEndGW")
+  fixtures        Fixture[]
+  playerStats     PlayerGameweekStats[]
+  squadScores     SquadGameweekScore[]
+  leaguesStarting League[]              @relation("LeagueStartGW")
+  leaguesEnding   League[]              @relation("LeagueEndGW")
 
   @@map("gameweeks")
+}
+
+/// A Premier League match between two clubs. Data synced from the FPL API.
+model Fixture {
+  id          Int       @id @default(autoincrement())
+  fplId       Int       @unique @map("fpl_id")
+  gameweekId  Int?      @map("gameweek_id")
+  homeTeamId  Int       @map("home_team_id")
+  awayTeamId  Int       @map("away_team_id")
+  kickoffTime DateTime? @map("kickoff_time")
+  started     Boolean   @default(false)
+  finished    Boolean   @default(false)
+  homeScore   Int?      @map("home_score")
+  awayScore   Int?      @map("away_score")
+  minutes     Int       @default(0)
+
+  // Relations
+  gameweek Gameweek? @relation(fields: [gameweekId], references: [id])
+  homeTeam Team      @relation("HomeFixtures", fields: [homeTeamId], references: [id])
+  awayTeam Team      @relation("AwayFixtures", fields: [awayTeamId], references: [id])
+
+  @@map("fixtures")
 }
 
 /// How many fantasy points a player scored in a specific gameweek.
