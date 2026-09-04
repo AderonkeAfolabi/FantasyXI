@@ -214,8 +214,8 @@ export class AuthService {
       where: { email: normalizedEmail },
     });
 
-    // Timing-safe / generic rejection if user does not exist
-    if (!user) {
+    // Timing-safe / generic rejection if user does not exist or has no password set (e.g. Google-only user)
+    if (!user || !user.passwordHash) {
       throw new AuthUnauthorizedError("Invalid email or password");
     }
 
@@ -227,6 +227,112 @@ export class AuthService {
 
     if (!isPasswordValid) {
       throw new AuthUnauthorizedError("Invalid email or password");
+    }
+
+    const safeUser = toSafeUser(user);
+    const token = signAccessToken({
+      userId: user.id,
+      email: user.email,
+      username: user.username,
+    });
+
+    return {
+      user: safeUser,
+      token,
+    };
+  }
+
+  /**
+   * Handles Google OAuth authentication and safe account linking.
+   *
+   * Rules:
+   * 1. Requires verified email from Google (emailVerified === true).
+   * 2. If googleId matches existing user -> authenticate user.
+   * 3. If email matches existing user:
+   *    - If user already linked to a different googleId -> throw AuthConflictError.
+   *    - Safe account linking: links googleId to existing user WITHOUT touching passwordHash.
+   * 4. If neither matches -> creates new user with passwordHash = null.
+   * 5. Always issues FantasyXI JWT access token.
+   */
+  public async handleGoogleAuth(input: {
+    googleId: string;
+    email: string;
+    name?: string | null;
+    emailVerified: boolean;
+  }): Promise<AuthResult> {
+    if (!input.googleId) {
+      throw new AuthValidationError("Google ID is required");
+    }
+
+    if (!input.emailVerified) {
+      throw new AuthValidationError("Google account email is not verified");
+    }
+
+    const normalizedEmail = this.normalizeEmail(input.email);
+
+    // 1. Check if user already exists with this googleId
+    let user = await this.db.user.findUnique({
+      where: { googleId: input.googleId },
+    });
+
+    if (user) {
+      const safeUser = toSafeUser(user);
+      const token = signAccessToken({
+        userId: user.id,
+        email: user.email,
+        username: user.username,
+      });
+      return { user: safeUser, token };
+    }
+
+    // 2. Check if a user with this email already exists
+    const existingByEmail = await this.db.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (existingByEmail) {
+      // Conflict check: if this user is already linked to a different Google account
+      if (
+        existingByEmail.googleId &&
+        existingByEmail.googleId !== input.googleId
+      ) {
+        throw new AuthConflictError(
+          "This email address is already linked to a different Google account."
+        );
+      }
+
+      // Safe account linking:
+      // Link googleId to existing user, preserve existing passwordHash untouched
+      user = await this.db.user.update({
+        where: { id: existingByEmail.id },
+        data: {
+          googleId: input.googleId,
+          name: existingByEmail.name ?? input.name ?? null,
+        },
+      });
+    } else {
+      // 3. Create a brand new user from Google
+      const base = this.generateBaseUsername(
+        normalizedEmail,
+        input.name ?? undefined
+      );
+      let finalUsername = base;
+      const existingUsername = await this.db.user.findUnique({
+        where: { username: finalUsername },
+      });
+      if (existingUsername) {
+        finalUsername = `${base}_${crypto.randomBytes(2).toString("hex")}`;
+      }
+
+      user = await this.db.user.create({
+        data: {
+          email: normalizedEmail,
+          name: input.name ? input.name.trim() : null,
+          googleId: input.googleId,
+          username: finalUsername,
+          passwordHash: null,
+        },
+      });
     }
 
     const safeUser = toSafeUser(user);
