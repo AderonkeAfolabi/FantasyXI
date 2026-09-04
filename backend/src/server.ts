@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import apiV1Router from "./routes/index.js";
 
 dotenv.config();
 
@@ -17,8 +18,6 @@ app.use(
   })
 );
 app.use(express.json());
-
-import apiV1Router from "./routes/index.js";
 
 // ============================================================
 // Routes
