@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from "express";
-import { squadService } from "../services/squad/squadService.js";
+import {
+  squadService,
+  SquadForbiddenError,
+} from "../services/squad/squadService.js";
 import {
   SquadValidationError,
   SquadLockedError,
@@ -12,7 +15,7 @@ import { scoringService } from "../services/scoring/scoringService.js";
  * Handles creation, updates, validation, and scoring calculation for user fantasy squads.
  *
  * Laravel equivalent: Like app/Http/Controllers/SquadController.php using
- * dedicated FormRequests and SquadService.
+ * dedicated FormRequests and SquadService with authorization checks.
  */
 
 export async function createSquad(
@@ -21,7 +24,20 @@ export async function createSquad(
   next: NextFunction
 ): Promise<void> {
   try {
-    const squad = await squadService.createSquad(req.body);
+    if (!req.user || !req.user.id) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required to create a squad",
+      });
+      return;
+    }
+
+    // Always derive userId from authenticated token — ignore client-supplied userId
+    const squad = await squadService.createSquad({
+      ...req.body,
+      userId: req.user.id,
+    });
+
     res.status(201).json({
       success: true,
       message: "Fantasy squad created successfully",
@@ -70,14 +86,35 @@ export async function updateSquad(
   next: NextFunction
 ): Promise<void> {
   try {
+    if (!req.user || !req.user.id) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required to update squad",
+      });
+      return;
+    }
+
     const { id } = req.params;
-    const squad = await squadService.updateSquad(id as string, req.body);
+    // Pass authenticated user ID for ownership verification
+    const squad = await squadService.updateSquad(
+      id as string,
+      req.body,
+      req.user.id
+    );
+
     res.json({
       success: true,
       message: "Squad updated successfully",
       data: squad,
     });
   } catch (error) {
+    if (error instanceof SquadForbiddenError) {
+      res.status(403).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
     if (error instanceof SquadLockedError) {
       res.status(403).json({
         success: false,
@@ -94,6 +131,30 @@ export async function updateSquad(
       });
       return;
     }
+    next(error);
+  }
+}
+
+export async function getMySquads(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || !req.user.id) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+      return;
+    }
+
+    const squads = await squadService.getUserSquads(req.user.id);
+    res.json({
+      success: true,
+      data: squads,
+    });
+  } catch (error) {
     next(error);
   }
 }

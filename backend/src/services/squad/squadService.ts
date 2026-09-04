@@ -8,6 +8,18 @@ import {
 } from "./squadValidator.js";
 
 /**
+ * Custom error thrown when a user attempts to modify a squad they do not own.
+ *
+ * Laravel equivalent: AuthorizationException thrown by Gate::authorize() or Policy.
+ */
+export class SquadForbiddenError extends Error {
+  constructor(message: string = "You are not authorized to modify this squad") {
+    super(message);
+    this.name = "SquadForbiddenError";
+  }
+}
+
+/**
  * Fantasy Squad Management Service.
  *
  * Handles creation, updates, and retrieval of user squads with strict
@@ -17,6 +29,8 @@ import {
  *   (e.g. app/Services/SquadService.php)
  */
 export class SquadService {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(private readonly db: any = prisma) {}
   /**
    * Creates a new 15-player squad for a user.
    */
@@ -111,13 +125,23 @@ export class SquadService {
    * Updates a squad's lineup, captaincy, or transfers.
    * Throws SquadLockedError if the active gameweek deadline has passed.
    */
-  public async updateSquad(squadId: string, input: UpdateSquadInput) {
-    const existing = await prisma.squad.findUnique({
+  public async updateSquad(
+    squadId: string,
+    input: UpdateSquadInput,
+    requestingUserId?: string
+  ) {
+    const existing = await this.db.squad.findUnique({
       where: { id: squadId },
     });
 
     if (!existing) {
       throw new SquadValidationError(`Squad ${squadId} not found`);
+    }
+
+    if (requestingUserId && existing.userId !== requestingUserId) {
+      throw new SquadForbiddenError(
+        "You are not authorized to modify this squad"
+      );
     }
 
     // Check gameweek deadline

@@ -22,14 +22,17 @@ export async function createLeague(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { userId, ...leagueInput } = req.body;
-    if (!userId) {
-      res.status(400).json({
+    if (!req.user || !req.user.id) {
+      res.status(401).json({
         success: false,
-        message: "User ID is required to create a league",
+        message: "Authentication required to create a league",
       });
       return;
     }
+
+    // Always derive creator identity from authenticated user
+    const userId = req.user.id;
+    const { userId: _bodyUserId, creatorId: _bodyCreatorId, ...leagueInput } = req.body;
 
     const league = await leagueService.createLeague(userId, leagueInput);
     res.status(201).json({
@@ -102,13 +105,22 @@ export async function joinLeague(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { id } = req.params;
-    const { userId, squadId } = req.body;
+    if (!req.user || !req.user.id) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required to join a league",
+      });
+      return;
+    }
 
-    if (!userId || !squadId) {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { squadId } = req.body;
+
+    if (!squadId) {
       res.status(400).json({
         success: false,
-        message: "Both userId and squadId are required to join a league",
+        message: "squadId is required to join a league",
       });
       return;
     }
@@ -195,16 +207,16 @@ export async function cancelLeague(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      res.status(400).json({
+    if (!req.user || !req.user.id) {
+      res.status(401).json({
         success: false,
-        message: "User ID is required to cancel a league",
+        message: "Authentication required to cancel a league",
       });
       return;
     }
+
+    const { id } = req.params;
+    const userId = req.user.id;
 
     const cancelled = await leagueService.cancelLeague(id as string, userId);
 
