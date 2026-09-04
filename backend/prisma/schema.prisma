@@ -1,0 +1,295 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+/// Player position on the pitch — maps to FPL's element_type
+enum Position {
+  GKP
+  DEF
+  MID
+  FWD
+}
+
+/// Current status of a league
+enum LeagueStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+}
+
+/// How a league is scored
+enum ScoringType {
+  CLASSIC
+  HEAD_TO_HEAD
+}
+
+/// Types of USDC transactions
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  ENTRY_FEE
+  PRIZE
+}
+
+/// Status of a blockchain transaction
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+/// A registered user on the platform.
+/// Laravel equivalent: the `users` table you'd create with `php artisan make:auth`.
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  username      String   @unique
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  wallet        Wallet?
+  squads        Squad[]
+  createdLeagues League[]       @relation("LeagueCreator")
+  memberships   LeagueMember[]
+  transactions  Transaction[]
+
+  @@map("users")
+}
+
+/// A Stellar wallet linked to a user for USDC payments.
+/// Optional — users can use the platform without one.
+model Wallet {
+  id             String   @id @default(uuid())
+  userId         String   @unique @map("user_id")
+  stellarAddress String   @unique @map("stellar_address")
+  connectedAt    DateTime @default(now()) @map("connected_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("wallets")
+}
+
+/// A Premier League club. Data synced from the FPL API.
+model Team {
+  id        Int    @id @default(autoincrement())
+  fplId     Int    @unique @map("fpl_id")
+  name      String
+  shortName String @map("short_name")
+  logoUrl   String? @map("logo_url")
+
+  // Relations
+  players Player[]
+
+  @@map("teams")
+}
+
+/// A real Premier League footballer. Data synced from the FPL API.
+/// Like an Eloquent model with `$fillable` fields populated from an external API.
+model Player {
+  id             Int      @id @default(autoincrement())
+  fplId          Int      @unique @map("fpl_id")
+  firstName      String   @map("first_name")
+  lastName       String   @map("last_name")
+  displayName    String   @map("display_name")
+  position       Position
+  teamId         Int      @map("team_id")
+  price          Decimal  @db.Decimal(4, 1)
+  totalPoints    Int      @default(0) @map("total_points")
+  minutesPlayed  Int      @default(0) @map("minutes_played")
+  goalsScored    Int      @default(0) @map("goals_scored")
+  assists        Int      @default(0)
+  cleanSheets    Int      @default(0) @map("clean_sheets")
+  photoUrl       String?  @map("photo_url")
+  isAvailable    Boolean  @default(true) @map("is_available")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  team           Team               @relation(fields: [teamId], references: [id])
+  squadPlayers   SquadPlayer[]
+  gameweekStats  PlayerGameweekStats[]
+
+  @@map("players")
+}
+
+/// A round of Premier League matches (38 per season).
+model Gameweek {
+  id         Int      @id @default(autoincrement())
+  fplId      Int      @unique @map("fpl_id")
+  name       String
+  deadline   DateTime
+  isCurrent  Boolean  @default(false) @map("is_current")
+  isFinished Boolean  @default(false) @map("is_finished")
+  season     String
+
+  // Relations
+  playerStats      PlayerGameweekStats[]
+  squadScores      SquadGameweekScore[]
+  leaguesStarting  League[] @relation("LeagueStartGW")
+  leaguesEnding    League[] @relation("LeagueEndGW")
+
+  @@map("gameweeks")
+}
+
+/// How many fantasy points a player scored in a specific gameweek.
+/// Like a Laravel pivot table with extra columns.
+model PlayerGameweekStats {
+  id          Int     @id @default(autoincrement())
+  playerId    Int     @map("player_id")
+  gameweekId  Int     @map("gameweek_id")
+  minutes     Int     @default(0)
+  goals       Int     @default(0)
+  assists     Int     @default(0)
+  cleanSheet  Boolean @default(false) @map("clean_sheet")
+  yellowCards Int     @default(0) @map("yellow_cards")
+  redCards    Int     @default(0) @map("red_cards")
+  saves       Int     @default(0)
+  bonus       Int     @default(0)
+  totalPoints Int     @default(0) @map("total_points")
+
+  // Relations
+  player   Player   @relation(fields: [playerId], references: [id])
+  gameweek Gameweek @relation(fields: [gameweekId], references: [id])
+
+  @@unique([playerId, gameweekId])
+  @@map("player_gameweek_stats")
+}
+
+/// A user's fantasy football squad.
+model Squad {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  name            String
+  budgetRemaining Decimal  @default(100.0) @map("budget_remaining") @db.Decimal(5, 1)
+  totalPoints     Int      @default(0) @map("total_points")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  players        SquadPlayer[]
+  gameweekScores SquadGameweekScore[]
+  memberships    LeagueMember[]
+
+  @@map("squads")
+}
+
+/// A player selected in a squad — the join table between Squad and Player.
+/// Tracks whether the player is starting, captain, bench order, and purchase price.
+model SquadPlayer {
+  id             Int     @id @default(autoincrement())
+  squadId        String  @map("squad_id")
+  playerId       Int     @map("player_id")
+  isCaptain      Boolean @default(false) @map("is_captain")
+  isViceCaptain  Boolean @default(false) @map("is_vice_captain")
+  isStarter      Boolean @default(true) @map("is_starter")
+  positionOrder  Int     @map("position_order")
+  purchasePrice  Decimal @map("purchase_price") @db.Decimal(4, 1)
+
+  // Relations
+  squad  Squad  @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@unique([squadId, playerId])
+  @@map("squad_players")
+}
+
+/// A fantasy league created by a user.
+model League {
+  id               String       @id @default(uuid())
+  name             String
+  description      String?
+  creatorId        String       @map("creator_id")
+  inviteCode       String       @unique @map("invite_code")
+  maxMembers       Int          @default(20) @map("max_members")
+  entryFee         Decimal      @default(0) @map("entry_fee") @db.Decimal(10, 2)
+  prizePool        Decimal      @default(0) @map("prize_pool") @db.Decimal(10, 2)
+  status           LeagueStatus @default(DRAFT)
+  scoringType      ScoringType  @default(CLASSIC) @map("scoring_type")
+  startGameweekId  Int?         @map("start_gameweek_id")
+  endGameweekId    Int?         @map("end_gameweek_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  // Relations
+  creator        User           @relation("LeagueCreator", fields: [creatorId], references: [id])
+  startGameweek  Gameweek?      @relation("LeagueStartGW", fields: [startGameweekId], references: [id])
+  endGameweek    Gameweek?      @relation("LeagueEndGW", fields: [endGameweekId], references: [id])
+  members        LeagueMember[]
+  transactions   Transaction[]
+
+  @@map("leagues")
+}
+
+/// A user's membership in a league — links user, squad, and league together.
+/// Like a Laravel pivot table: `league_user` with extra columns.
+model LeagueMember {
+  id          String   @id @default(uuid())
+  leagueId    String   @map("league_id")
+  userId      String   @map("user_id")
+  squadId     String   @map("squad_id")
+  joinedAt    DateTime @default(now()) @map("joined_at")
+  hasPaid     Boolean  @default(false) @map("has_paid")
+  rank        Int?
+  totalPoints Int      @default(0) @map("total_points")
+
+  // Relations
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+  squad  Squad  @relation(fields: [squadId], references: [id])
+
+  @@unique([leagueId, userId])
+  @@map("league_members")
+}
+
+/// How many points a squad scored in a specific gameweek.
+model SquadGameweekScore {
+  id            Int      @id @default(autoincrement())
+  squadId       String   @map("squad_id")
+  gameweekId    Int      @map("gameweek_id")
+  points        Int      @default(0)
+  benchPoints   Int      @default(0) @map("bench_points")
+  captainPoints Int      @default(0) @map("captain_points")
+  calculatedAt  DateTime @default(now()) @map("calculated_at")
+
+  // Relations
+  squad    Squad    @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  gameweek Gameweek @relation(fields: [gameweekId], references: [id])
+
+  @@unique([squadId, gameweekId])
+  @@map("squad_gameweek_scores")
+}
+
+/// Records USDC transactions — entry fees, prizes, deposits, withdrawals.
+model Transaction {
+  id             String            @id @default(uuid())
+  userId         String            @map("user_id")
+  leagueId       String?           @map("league_id")
+  type           TransactionType
+  amount         Decimal           @db.Decimal(10, 2)
+  stellarTxHash  String?           @map("stellar_tx_hash")
+  status         TransactionStatus @default(PENDING)
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  // Relations
+  user   User    @relation(fields: [userId], references: [id])
+  league League? @relation(fields: [leagueId], references: [id])
+
+  @@map("transactions")
+}
