@@ -33,4 +33,27 @@ router.get("/:id/standings", getLeagueStandings);
 // POST /api/v1/leagues/:id/cancel (Protected: creator only)
 router.post("/:id/cancel", requireAuth, cancelLeague);
 
+// ============================================================
+// Financial & Stellar Escrow Routes
+// ============================================================
+import financialRoutes from "./financial.routes.js";
+import {
+  getPaymentRequirement,
+  submitPayment,
+  verifyPayment,
+  getSettlementPlan,
+  reconcileLeague,
+} from "../controllers/financial.controller.js";
+
+// Nested router under /:leagueId/financial
+router.use("/:leagueId/financial", financialRoutes);
+
+// Direct convenience endpoints under /:leagueId
+router.get("/:leagueId/payment-requirement", requireAuth, getPaymentRequirement);
+router.post("/:leagueId/submit-payment", requireAuth, submitPayment);
+router.post("/:leagueId/verify-payment", requireAuth, verifyPayment);
+router.get("/:leagueId/settlement-plan", requireAuth, getSettlementPlan);
+router.get("/:leagueId/reconcile", requireAuth, reconcileLeague);
+
 export default router;
+
