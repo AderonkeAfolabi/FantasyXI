@@ -37,23 +37,35 @@ enum MembershipStatus {
   REFUNDED
 }
 
+/// Financial lifecycle states for league entry fee payment
+enum PaymentStatus {
+  PENDING
+  PAYMENT_INITIATED
+  PAYMENT_SUBMITTED
+  PAYMENT_CONFIRMED
+  PAYMENT_FAILED
+  REFUND_PENDING
+  REFUNDED
+}
+
 /// How a league is scored
 enum ScoringType {
   CLASSIC
   HEAD_TO_HEAD
 }
 
-/// Types of USDC transactions
+/// Types of USDC financial transactions
 enum TransactionType {
-  DEPOSIT
-  WITHDRAWAL
   ENTRY_FEE
-  PRIZE
+  PLATFORM_FEE
+  PRIZE_PAYOUT
+  REFUND
 }
 
 /// Status of a blockchain transaction
 enum TransactionStatus {
   PENDING
+  SUBMITTED
   CONFIRMED
   FAILED
 }
@@ -71,6 +83,7 @@ model User {
   username      String   @unique
   name          String?
   googleId      String?  @unique @map("google_id")
+  countryCode   String?  @map("country_code")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -294,17 +307,20 @@ model LeagueMember {
   id          String           @id @default(uuid())
   leagueId    String           @map("league_id")
   userId      String           @map("user_id")
-  squadId     String           @map("squad_id")
-  status      MembershipStatus @default(PENDING)
-  joinedAt    DateTime         @default(now()) @map("joined_at")
-  hasPaid     Boolean          @default(false) @map("has_paid")
-  rank        Int?
-  totalPoints Int              @default(0) @map("total_points")
+  squadId        String           @map("squad_id")
+  status         MembershipStatus @default(PENDING)
+  paymentStatus  PaymentStatus    @default(PENDING) @map("payment_status")
+  stellarAddress String?          @map("stellar_address")
+  joinedAt       DateTime         @default(now()) @map("joined_at")
+  hasPaid        Boolean          @default(false) @map("has_paid")
+  rank           Int?
+  totalPoints    Int              @default(0) @map("total_points")
 
   // Relations
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id])
-  squad  Squad  @relation(fields: [squadId], references: [id])
+  league       League        @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id])
+  squad        Squad         @relation(fields: [squadId], references: [id])
+  transactions Transaction[]
 
   @@unique([leagueId, userId])
   @@map("league_members")
@@ -333,15 +349,23 @@ model Transaction {
   id             String            @id @default(uuid())
   userId         String            @map("user_id")
   leagueId       String?           @map("league_id")
+  memberId       String?           @map("member_id")
   type           TransactionType
   amount         Decimal           @db.Decimal(10, 2)
-  stellarTxHash  String?           @map("stellar_tx_hash")
+  asset          String            @default("USDC")
+  assetIssuer    String?           @map("asset_issuer")
+  stellarTxHash  String?           @unique @map("stellar_tx_hash")
+  ledgerSeq      Int?              @map("ledger_seq")
+  memo           String?
   status         TransactionStatus @default(PENDING)
+  confirmedAt    DateTime?         @map("confirmed_at")
+  errorMessage   String?           @map("error_message")
   createdAt      DateTime          @default(now()) @map("created_at")
 
   // Relations
-  user   User    @relation(fields: [userId], references: [id])
-  league League? @relation(fields: [leagueId], references: [id])
+  user   User          @relation(fields: [userId], references: [id])
+  league League?       @relation(fields: [leagueId], references: [id])
+  member LeagueMember? @relation(fields: [memberId], references: [id])
 
   @@map("transactions")
 }

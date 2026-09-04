@@ -16,6 +16,7 @@ import {
   Position,
   LeagueStatus,
   MembershipStatus,
+  PaymentStatus,
   ScoringType,
   TransactionType,
   TransactionStatus,
@@ -25,6 +26,7 @@ export {
   Position,
   LeagueStatus,
   MembershipStatus,
+  PaymentStatus,
   ScoringType,
   TransactionType,
   TransactionStatus,
@@ -238,6 +240,82 @@ export interface PrizeDistribution {
     third: number;
   };
 }
+
+// ============================================================
+// Financial & Stellar Escrow Types
+// ============================================================
+
+export interface PaymentRequirement {
+  leagueId: string;
+  leagueName: string;
+  entryFee: number; // in USDC
+  assetCode: string; // e.g. "USDC"
+  assetIssuer?: string;
+  destinationAddress: string; // Escrow contract or platform treasury address
+  memo: string; // Deterministic identifier (e.g. "LEAGUE:<id>:USER:<id>")
+  paymentStatus: PaymentStatus;
+}
+
+export interface PaymentSubmissionInput {
+  stellarTxHash: string;
+  stellarAddress: string;
+}
+
+export interface PaymentVerificationResult {
+  success: boolean;
+  txHash: string;
+  ledgerSeq?: number;
+  amount?: number;
+  assetCode?: string;
+  senderAddress?: string;
+  destinationAddress?: string;
+  confirmedAt?: Date;
+  error?: string;
+}
+
+export interface SettlementWinner {
+  rank: number;
+  userId: string;
+  username: string;
+  stellarAddress: string;
+  squadName: string;
+  totalPoints: number;
+  prizeAmount: number; // in USDC
+}
+
+export interface SettlementPlan {
+  leagueId: string;
+  leagueName: string;
+  status: LeagueStatus;
+  totalParticipants: number;
+  entryFee: number;
+  grossPool: number;
+  platformFee: number;
+  netPrizePool: number;
+  winners: SettlementWinner[];
+  canSettle: boolean;
+  unsettledReason?: string;
+}
+
+export interface ReconciliationReport {
+  leagueId: string;
+  leagueName: string;
+  activeMemberCount: number;
+  entryFee: number;
+  expectedGross: number;
+  confirmedDepositsTotal: number;
+  discrepancy: number;
+  isBalanced: boolean;
+  transactions: Array<{
+    id: string;
+    type: TransactionType;
+    status: TransactionStatus;
+    amount: number;
+    stellarTxHash: string | null;
+    confirmedAt: Date | null;
+  }>;
+}
+
 
 
 
