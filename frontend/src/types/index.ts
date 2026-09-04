@@ -1,0 +1,217 @@
+/**
+ * Shared TypeScript types for the FantasyXI frontend.
+ *
+ * These describe the shape of data coming back from the backend API.
+ * They mirror the backend Prisma models but only include fields the
+ * frontend actually needs (no password hashes, etc.).
+ *
+ * Laravel equivalent: Think of these like API Resources — they define
+ * what the JSON response looks like, not what the database stores.
+ */
+
+// ============================================================
+// Enums — must match backend exactly
+// ============================================================
+
+export enum Position {
+  GKP = "GKP",
+  DEF = "DEF",
+  MID = "MID",
+  FWD = "FWD",
+}
+
+export enum LeagueStatus {
+  DRAFT = "DRAFT",
+  ACTIVE = "ACTIVE",
+  COMPLETED = "COMPLETED",
+}
+
+export enum ScoringType {
+  CLASSIC = "CLASSIC",
+  HEAD_TO_HEAD = "HEAD_TO_HEAD",
+}
+
+export enum TransactionType {
+  DEPOSIT = "DEPOSIT",
+  WITHDRAWAL = "WITHDRAWAL",
+  ENTRY_FEE = "ENTRY_FEE",
+  PRIZE = "PRIZE",
+}
+
+export enum TransactionStatus {
+  PENDING = "PENDING",
+  CONFIRMED = "CONFIRMED",
+  FAILED = "FAILED",
+}
+
+// ============================================================
+// API response types
+// ============================================================
+
+export interface User {
+  id: string;
+  email: string;
+  username: string;
+  createdAt: string;
+}
+
+export interface Team {
+  id: number;
+  fplId: number;
+  name: string;
+  shortName: string;
+  logoUrl: string | null;
+}
+
+export interface Player {
+  id: number;
+  fplId: number;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  position: Position;
+  teamId: number;
+  team?: Team;
+  price: number;
+  totalPoints: number;
+  minutesPlayed: number;
+  goalsScored: number;
+  assists: number;
+  cleanSheets: number;
+  photoUrl: string | null;
+  isAvailable: boolean;
+}
+
+export interface Gameweek {
+  id: number;
+  fplId: number;
+  name: string;
+  deadline: string;
+  isCurrent: boolean;
+  isFinished: boolean;
+  season: string;
+}
+
+export interface PlayerGameweekStats {
+  id: number;
+  playerId: number;
+  gameweekId: number;
+  minutes: number;
+  goals: number;
+  assists: number;
+  cleanSheet: boolean;
+  yellowCards: number;
+  redCards: number;
+  saves: number;
+  bonus: number;
+  totalPoints: number;
+}
+
+export interface Squad {
+  id: string;
+  userId: string;
+  name: string;
+  budgetRemaining: number;
+  totalPoints: number;
+  players?: SquadPlayer[];
+  createdAt: string;
+}
+
+export interface SquadPlayer {
+  id: number;
+  squadId: string;
+  playerId: number;
+  player?: Player;
+  isCaptain: boolean;
+  isViceCaptain: boolean;
+  isStarter: boolean;
+  positionOrder: number;
+  purchasePrice: number;
+}
+
+export interface League {
+  id: string;
+  name: string;
+  description: string | null;
+  creatorId: string;
+  inviteCode: string;
+  maxMembers: number;
+  entryFee: number;
+  prizePool: number;
+  status: LeagueStatus;
+  scoringType: ScoringType;
+  startGameweekId: number | null;
+  endGameweekId: number | null;
+  memberCount?: number;
+  createdAt: string;
+}
+
+export interface LeagueMember {
+  id: string;
+  leagueId: string;
+  userId: string;
+  user?: User;
+  squadId: string;
+  squad?: Squad;
+  hasPaid: boolean;
+  rank: number | null;
+  totalPoints: number;
+  joinedAt: string;
+}
+
+export interface Transaction {
+  id: string;
+  userId: string;
+  leagueId: string | null;
+  type: TransactionType;
+  amount: number;
+  stellarTxHash: string | null;
+  status: TransactionStatus;
+  createdAt: string;
+}
+
+// ============================================================
+// API wrapper types
+// ============================================================
+
+export interface ApiSuccessResponse<T = unknown> {
+  success: true;
+  data: T;
+  message?: string;
+}
+
+export interface ApiErrorResponse {
+  success: false;
+  message: string;
+  errors?: Record<string, string[]>;
+}
+
+export interface AuthResponse {
+  success: true;
+  token: string;
+  user: User;
+}
+
+// ============================================================
+// Squad composition constants (mirrors backend)
+// ============================================================
+
+export const SQUAD_RULES = {
+  TOTAL_PLAYERS: 15,
+  STARTERS: 11,
+  BENCH: 4,
+  POSITION_COUNTS: {
+    [Position.GKP]: 2,
+    [Position.DEF]: 5,
+    [Position.MID]: 5,
+    [Position.FWD]: 3,
+  } as const,
+  MIN_STARTERS: {
+    [Position.GKP]: 1,
+    [Position.DEF]: 3,
+    [Position.MID]: 2,
+    [Position.FWD]: 1,
+  } as const,
+  MAX_PER_TEAM: 3,
+  STARTING_BUDGET: 100.0,
+} as const;
