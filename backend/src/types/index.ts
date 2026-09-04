@@ -65,8 +65,26 @@ export const SQUAD_RULES = {
 } as const;
 
 // ============================================================
-// API request/response types
+// Authentication & User Types
 // ============================================================
+
+/** Authenticated user identity attached to Express Request (req.user) */
+export interface AuthUser {
+  id: string;
+  email: string;
+  username: string;
+  name?: string | null;
+}
+
+/** Safe user representation returned across public and auth endpoints */
+export interface SafeUser {
+  id: string;
+  email: string;
+  username: string;
+  name?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 /** Shape of a JWT payload after decoding */
 export interface JwtPayload {
@@ -75,28 +93,37 @@ export interface JwtPayload {
   username: string;
 }
 
-/** POST /api/auth/register */
-export interface RegisterRequest {
+/** POST /api/v1/auth/register input */
+export interface RegisterInput {
   email: string;
   password: string;
-  username: string;
+  name?: string;
+  username?: string;
 }
 
-/** POST /api/auth/login */
-export interface LoginRequest {
+/** Backwards-compatible alias */
+export type RegisterRequest = RegisterInput;
+
+/** POST /api/v1/auth/login input */
+export interface LoginInput {
   email: string;
   password: string;
 }
 
-/** Standard auth response */
+/** Backwards-compatible alias */
+export type LoginRequest = LoginInput;
+
+/** Auth response payload containing safe user and token */
+export interface AuthResult {
+  user: SafeUser;
+  token: string;
+}
+
+/** Standard auth API response wrapper */
 export interface AuthResponse {
   success: boolean;
   token: string;
-  user: {
-    id: string;
-    email: string;
-    username: string;
-  };
+  user: SafeUser;
 }
 
 /** Standard API error response */
@@ -211,5 +238,7 @@ export interface PrizeDistribution {
     third: number;
   };
 }
+
+
 
 

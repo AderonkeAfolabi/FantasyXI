@@ -1,0 +1,58 @@
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+/**
+ * Centralized JWT Authentication Configuration.
+ *
+ * Laravel equivalent: config/sanctum.php or config/jwt.php.
+ */
+
+const FALLBACK_DEV_SECRET = "fantasyxi-dev-insecure-fallback-secret-at-least-32-chars-long";
+
+export function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (isProduction) {
+    if (!secret || secret === "CHANGE_ME_TO_A_RANDOM_SECRET" || secret.length < 32) {
+      throw new Error(
+        "FATAL: In production, JWT_SECRET must be set to a secure string with at least 32 characters."
+      );
+    }
+    return secret;
+  }
+
+  return secret && secret.trim().length > 0 ? secret : FALLBACK_DEV_SECRET;
+}
+
+export function getJwtExpiresIn(): string {
+  return process.env.JWT_EXPIRES_IN || "7d";
+}
+
+import { JwtPayload } from "../types/index.js";
+
+export { JwtPayload };
+
+/**
+ * Signs a minimal JWT payload.
+ */
+export function signAccessToken(payload: JwtPayload): string {
+  const secret = getJwtSecret();
+  const expiresIn = getJwtExpiresIn();
+
+  return jwt.sign(payload, secret, {
+    expiresIn: expiresIn as jwt.SignOptions["expiresIn"],
+  });
+}
+
+/**
+ * Verifies a JWT and returns the decoded payload.
+ * Throws JsonWebTokenError or TokenExpiredError if invalid.
+ */
+export function verifyAccessToken(token: string): JwtPayload {
+  const secret = getJwtSecret();
+  const decoded = jwt.verify(token, secret);
+  return decoded as JwtPayload;
+}
