@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Vec,
 };
 
 #[contracterror]
@@ -91,7 +91,7 @@ impl FantasyXIEscrow {
         }
 
         let state = LeagueState {
-            creator,
+            creator: creator.clone(),
             entry_fee,
             total_deposited: 0,
             participant_count: 0,
@@ -99,6 +99,12 @@ impl FantasyXIEscrow {
         };
 
         env.storage().persistent().set(&key, &state);
+
+        env.events().publish(
+            (symbol_short!("created"), league_id),
+            (creator, entry_fee),
+        );
+
         Ok(())
     }
 
@@ -145,6 +151,11 @@ impl FantasyXIEscrow {
         league.total_deposited += league.entry_fee;
         league.participant_count += 1;
         env.storage().persistent().set(&league_key, &league);
+
+        env.events().publish(
+            (symbol_short!("deposit"), league_id),
+            (participant, league.entry_fee),
+        );
 
         Ok(())
     }
@@ -225,6 +236,11 @@ impl FantasyXIEscrow {
         league.status = LeagueStatus::Settled;
         env.storage().persistent().set(&league_key, &league);
 
+        env.events().publish(
+            (symbol_short!("settle"), league_id),
+            (total_payout, platform_fee),
+        );
+
         Ok(())
     }
 
@@ -281,6 +297,11 @@ impl FantasyXIEscrow {
 
         league.status = LeagueStatus::Cancelled;
         env.storage().persistent().set(&league_key, &league);
+
+        env.events().publish(
+            (symbol_short!("refund"), league_id),
+            participants.len(),
+        );
 
         Ok(())
     }
@@ -386,7 +407,74 @@ mod test {
 
         // Double settlement must fail
         let result = client.try_settle(&admin, &200, &winners, &treasury, &5_000_000);
-        assert!(result.is_err());
+        assert_eq!(result, Err(Ok(EscrowError::AlreadySettled)));
+    }
+
+    #[test]
+    fn test_duplicate_deposit_rejected() {
+        let (env, admin, token_addr, client) = setup_test();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_addr);
+
+        let user1 = Address::generate(&env);
+        token_admin_client.mint(&user1, &100_000_000);
+
+        client.create_league(&admin, &201, &50_000_000);
+        client.deposit(&user1, &201);
+
+        // Second deposit must fail
+        let result = client.try_deposit(&user1, &201);
+        assert_eq!(result, Err(Ok(EscrowError::AlreadyDeposited)));
+    }
+
+    #[test]
+    fn test_unauthorized_settlement_rejected() {
+        let (env, admin, token_addr, client) = setup_test();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_addr);
+
+        let user1 = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        token_admin_client.mint(&user1, &50_000_000);
+        client.create_league(&admin, &202, &50_000_000);
+        client.deposit(&user1, &202);
+
+        let winners = vec![
+            &env,
+            WinnerPayout {
+                winner: attacker.clone(),
+                amount: 47_500_000,
+            },
+        ];
+
+        // Attacker attempts to settle
+        let result = client.try_settle(&attacker, &202, &winners, &treasury, &2_500_000);
+        assert_eq!(result, Err(Ok(EscrowError::NotAuthorized)));
+    }
+
+    #[test]
+    fn test_settlement_payout_exceeding_deposits_rejected() {
+        let (env, admin, token_addr, client) = setup_test();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_addr);
+
+        let user1 = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        token_admin_client.mint(&user1, &50_000_000);
+        client.create_league(&admin, &203, &50_000_000);
+        client.deposit(&user1, &203); // Total deposited = 50_000_000
+
+        // Attempt payout of 100_000_000
+        let winners = vec![
+            &env,
+            WinnerPayout {
+                winner: user1.clone(),
+                amount: 90_000_000,
+            },
+        ];
+
+        let result = client.try_settle(&admin, &203, &winners, &treasury, &10_000_000);
+        assert_eq!(result, Err(Ok(EscrowError::PayoutExceedsDeposits)));
     }
 
     #[test]
@@ -410,5 +498,20 @@ mod test {
         assert_eq!(token_client.balance(&user1), 50_000_000);
         let league = client.get_league(&300).unwrap();
         assert_eq!(league.status, LeagueStatus::Cancelled);
+
+        // Duplicate refund should do nothing (balance remains 50_000_000, no second payout)
+        client.refund(&admin, &300, &participants);
+        assert_eq!(token_client.balance(&user1), 50_000_000);
+
+        // Settlement on a cancelled league must fail
+        let winners = vec![
+            &env,
+            WinnerPayout {
+                winner: user1.clone(),
+                amount: 50_000_000,
+            },
+        ];
+        let result = client.try_settle(&admin, &300, &winners, &admin, &0);
+        assert_eq!(result, Err(Ok(EscrowError::AlreadySettled)));
     }
 }
