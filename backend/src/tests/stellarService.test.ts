@@ -347,4 +347,78 @@ describe("StellarService Abstraction & Validation", () => {
       );
     });
   });
+
+  describe("Soroban Contract Queries and Ledger Reconciliation", () => {
+    const mockSorobanClient: any = {
+      getLeague: async (leagueId: number | bigint) => {
+        if (Number(leagueId) === 999) return null;
+        return {
+          creator: senderKp.publicKey(),
+          entry_fee: 100_000_000n, // 10 USDC
+          participant_count: 3,
+          status: 1, // Active
+          total_deposited: 300_000_000n, // 30 USDC
+        };
+      },
+      getDeposit: async (_leagueId: number | bigint, _participant: string) => {
+        return 100_000_000n;
+      },
+      getTokenBalance: async (_address: string) => {
+        return 300_000_000n;
+      },
+    };
+
+    it("should query on-chain league state from Soroban client", async () => {
+      const service = new StellarService(createMockServer({}), mockSorobanClient);
+      const state = await service.getContractLeagueState(101);
+      assert.ok(state);
+      assert.strictEqual(state?.creator, senderKp.publicKey());
+      assert.strictEqual(state?.entry_fee, 100_000_000n);
+      assert.strictEqual(state?.participant_count, 3);
+      assert.strictEqual(state?.total_deposited, 300_000_000n);
+    });
+
+    it("should query participant deposit amount from Soroban client", async () => {
+      const service = new StellarService(createMockServer({}), mockSorobanClient);
+      const dep = await service.getContractDeposit(101, senderKp.publicKey());
+      assert.strictEqual(dep, 100_000_000n);
+    });
+
+    it("should query contract token balance from Soroban client", async () => {
+      const service = new StellarService(createMockServer({}), mockSorobanClient);
+      const bal = await service.getContractTokenBalance(destinationKp.publicKey());
+      assert.strictEqual(bal, 300_000_000n);
+    });
+
+    it("should reconcile balanced on-chain ledger with database expectations", async () => {
+      const service = new StellarService(createMockServer({}), mockSorobanClient);
+      // DB has 3 participants x 10 USDC = 30 USDC expected
+      const report = await service.reconcileWithContract(101, 30.0, 3);
+      assert.strictEqual(report.onChainBalanced, true);
+      assert.strictEqual(report.onChainDepositedUsdc, 30);
+      assert.strictEqual(report.onChainParticipantCount, 3);
+      assert.strictEqual(report.onChainStatus, "Active");
+      assert.strictEqual(report.discrepancyUsdc, 0);
+    });
+
+    it("should detect discrepancy when on-chain deposits differ from database", async () => {
+      const service = new StellarService(createMockServer({}), mockSorobanClient);
+      // DB expected 40 USDC (4 members), but on-chain only has 30 USDC (3 members)
+      const report = await service.reconcileWithContract(101, 40.0, 4);
+      assert.strictEqual(report.onChainBalanced, false);
+      assert.strictEqual(report.onChainDepositedUsdc, 30);
+      assert.strictEqual(report.onChainParticipantCount, 3);
+      assert.strictEqual(report.discrepancyUsdc, 10);
+    });
+
+    it("should throw when league is not found on Soroban contract", async () => {
+      const service = new StellarService(createMockServer({}), mockSorobanClient);
+      await assert.rejects(
+        async () => {
+          await service.reconcileWithContract(999, 10.0, 1);
+        },
+        /League 999 not found on Soroban contract/
+      );
+    });
+  });
 });

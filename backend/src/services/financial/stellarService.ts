@@ -9,6 +9,10 @@
 import { Horizon, StrKey } from "@stellar/stellar-sdk";
 import { getHorizonServer, stellarConfig } from "../../config/stellar.js";
 import { PaymentVerificationResult } from "../../types/index.js";
+import {
+  SorobanContractClient,
+  OnChainLeagueState,
+} from "./sorobanContractClient.js";
 
 export interface VerifyPaymentParams {
   txHash: string;
@@ -20,11 +24,34 @@ export interface VerifyPaymentParams {
   expectedSender?: string;
 }
 
+export interface ContractReconciliationResult {
+  onChainBalanced: boolean;
+  onChainDepositedUsdc: number;
+  onChainParticipantCount: number;
+  onChainStatus: string;
+  discrepancyUsdc: number;
+}
+
 export class StellarService {
   private server: Horizon.Server;
+  private sorobanClient?: SorobanContractClient;
 
-  constructor(customServer?: Horizon.Server) {
+  constructor(
+    customServer?: Horizon.Server,
+    customSorobanClient?: SorobanContractClient
+  ) {
     this.server = customServer || getHorizonServer();
+    this.sorobanClient = customSorobanClient;
+  }
+
+  public getSorobanClient(): SorobanContractClient | null {
+    if (this.sorobanClient) return this.sorobanClient;
+    try {
+      this.sorobanClient = new SorobanContractClient();
+      return this.sorobanClient;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -212,6 +239,76 @@ export class StellarService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Fetch on-chain league state from Soroban escrow contract.
+   */
+  public async getContractLeagueState(
+    leagueId: number | bigint
+  ): Promise<OnChainLeagueState | null> {
+    const client = this.getSorobanClient();
+    if (!client) {
+      throw new Error("Soroban contract client is not configured");
+    }
+    return client.getLeague(leagueId);
+  }
+
+  /**
+   * Fetch on-chain participant deposit amount from Soroban escrow contract.
+   */
+  public async getContractDeposit(
+    leagueId: number | bigint,
+    participantAddress: string
+  ): Promise<bigint> {
+    const client = this.getSorobanClient();
+    if (!client) {
+      throw new Error("Soroban contract client is not configured");
+    }
+    return client.getDeposit(leagueId, participantAddress);
+  }
+
+  /**
+   * Fetch USDC SAC token balance from Soroban for an account or contract address.
+   */
+  public async getContractTokenBalance(
+    addressOrContractId: string
+  ): Promise<bigint> {
+    const client = this.getSorobanClient();
+    if (!client) {
+      throw new Error("Soroban contract client is not configured");
+    }
+    return client.getTokenBalance(addressOrContractId);
+  }
+
+  /**
+   * Reconcile database expectations with live on-chain Soroban escrow state.
+   */
+  public async reconcileWithContract(
+    leagueId: number | bigint,
+    dbExpectedDepositsUsdc: number,
+    dbParticipantCount: number
+  ): Promise<ContractReconciliationResult> {
+    const state = await this.getContractLeagueState(leagueId);
+    if (!state) {
+      throw new Error(`League ${leagueId} not found on Soroban contract`);
+    }
+
+    // Convert stroops to USDC (7 decimals)
+    const onChainDepositedUsdc = Number(state.total_deposited) / 10_000_000;
+    const discrepancyUsdc = Math.abs(dbExpectedDepositsUsdc - onChainDepositedUsdc);
+    const countMatches = state.participant_count === dbParticipantCount;
+    const isBalanced = discrepancyUsdc < 0.0001 && countMatches;
+
+    const statusNames = ["Upcoming", "Active", "Settled", "Cancelled"];
+
+    return {
+      onChainBalanced: isBalanced,
+      onChainDepositedUsdc,
+      onChainParticipantCount: state.participant_count,
+      onChainStatus: statusNames[state.status] || "Unknown",
+      discrepancyUsdc: parseFloat(discrepancyUsdc.toFixed(4)),
+    };
   }
 }
 
