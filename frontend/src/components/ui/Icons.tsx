@@ -439,6 +439,7 @@ export {
   PlusIcon as IconPlus,
   RefreshIcon as IconRefresh,
   ArrowRightLeftIcon as IconSwap,
+  ArrowRightLeftIcon as IconArrowRightLeft,
   LogOutIcon as IconLogOut,
   AlertCircleIcon as IconAlertCircle,
   ShieldIcon as IconShield,
