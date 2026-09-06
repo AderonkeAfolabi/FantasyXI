@@ -110,3 +110,6 @@ export const StatusBadge: React.FC<{ status: LeagueStatus | MembershipStatus | s
       return <Badge>{status}</Badge>;
   }
 };
+
+export const LeagueStatusBadge = StatusBadge;
+
