@@ -383,3 +383,67 @@ export const GoogleIcon: React.FC<IconProps> = ({ size = 20, className = "", ...
     />
   </svg>
 );
+
+export const ChevronLeftIcon: React.FC<IconProps> = ({ size = 20, className = "", ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    {...props}
+  >
+    <path d="m15 18-6-6 6-6" />
+  </svg>
+);
+
+export const ChevronUpIcon: React.FC<IconProps> = ({ size = 20, className = "", ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    {...props}
+  >
+    <path d="m18 15-6-6-6 6" />
+  </svg>
+);
+
+export const SwapIcon = ArrowRightLeftIcon;
+
+// Convenient Icon* aliases
+export {
+  FootballIcon as IconFootball,
+  PitchIcon as IconPitch,
+  TrophyIcon as IconTrophy,
+  UsersIcon as IconUsers,
+  CalendarIcon as IconCalendar,
+  SearchIcon as IconSearch,
+  WalletIcon as IconWallet,
+  UserIcon as IconUser,
+  CheckIcon as IconCheck,
+  CloseIcon as IconClose,
+  ChevronRightIcon as IconChevronRight,
+  ChevronLeftIcon as IconChevronLeft,
+  ChevronDownIcon as IconChevronDown,
+  ChevronUpIcon as IconChevronUp,
+  PlusIcon as IconPlus,
+  RefreshIcon as IconRefresh,
+  ArrowRightLeftIcon as IconSwap,
+  LogOutIcon as IconLogOut,
+  AlertCircleIcon as IconAlertCircle,
+  ShieldIcon as IconShield,
+  CopyIcon as IconCopy,
+  GoogleIcon as IconGoogle,
+};
+
+
