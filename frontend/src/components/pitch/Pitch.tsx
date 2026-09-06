@@ -1,0 +1,157 @@
+"use client";
+
+import React from "react";
+import { Position, SquadPlayer, Player } from "@/types";
+import { PlayerCard } from "./PlayerCard";
+import { detectFormation } from "@/lib/formation";
+
+export interface PitchProps {
+  starters: Array<{
+    id?: number | string;
+    player?: Player | null;
+    isCaptain?: boolean;
+    isViceCaptain?: boolean;
+    positionOrder?: number;
+  }>;
+  selectedPlayerId?: number | null;
+  onPlayerClick?: (player: Player | null, position: Position, slotIndex: number) => void;
+}
+
+export const Pitch: React.FC<PitchProps> = ({
+  starters,
+  selectedPlayerId,
+  onPlayerClick,
+}) => {
+  // Group starters by position
+  const gkpStarters = starters.filter(
+    (s) => s.player?.position === Position.GKP
+  );
+  const defStarters = starters.filter(
+    (s) => s.player?.position === Position.DEF
+  );
+  const midStarters = starters.filter(
+    (s) => s.player?.position === Position.MID
+  );
+  const fwdStarters = starters.filter(
+    (s) => s.player?.position === Position.FWD
+  );
+
+  // If squad is not fully selected yet, fill placeholder slots according to standard 4-4-2
+  const gkpSlots = gkpStarters.length > 0 ? gkpStarters : [null];
+  const defSlots = defStarters.length > 0 ? defStarters : [null, null, null, null];
+  const midSlots = midStarters.length > 0 ? midStarters : [null, null, null, null];
+  const fwdSlots = fwdStarters.length > 0 ? fwdStarters : [null, null];
+
+  const currentFormation = detectFormation(starters as any);
+
+  return (
+    <div className="w-full relative rounded-2xl overflow-hidden shadow-2xl border border-pitch-border bg-slate-950">
+      {/* Tactical Grass Pitch Canvas */}
+      <div className="pitch-grass relative w-full min-h-[580px] sm:min-h-[660px] flex flex-col justify-between py-6 px-2 sm:px-6">
+        {/* Pitch Tactical Line Markings */}
+        <div className="absolute inset-0 pointer-events-none opacity-40">
+          {/* Halfway line */}
+          <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-white/40 -translate-y-1/2" />
+          {/* Center circle */}
+          <div className="absolute top-1/2 left-1/2 w-32 h-32 sm:w-40 sm:h-40 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/40" />
+          {/* Center spot */}
+          <div className="absolute top-1/2 left-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/60" />
+          {/* Top Penalty Box (Keeper Area) */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 sm:w-64 h-24 sm:h-28 border-b-2 border-x-2 border-white/30 rounded-b-lg" />
+          {/* Bottom Penalty Box */}
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-48 sm:w-64 h-24 sm:h-28 border-t-2 border-x-2 border-white/30 rounded-t-lg" />
+        </div>
+
+        {/* Formation Header Pill */}
+        <div className="relative z-10 flex items-center justify-between px-2 mb-2">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-950/80 border border-slate-800 text-xs font-bold font-mono text-emerald-400 backdrop-blur-sm shadow-md">
+            <span>FORMATION</span>
+            <span className="text-white bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
+              {currentFormation}
+            </span>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-300 bg-slate-950/70 px-2.5 py-1 rounded-full border border-slate-800/80">
+            {starters.filter((s) => !!s.player).length} / 11 Starters
+          </div>
+        </div>
+
+        {/* Row 1: Goalkeeper (GKP) */}
+        <div className="relative z-10 flex justify-center items-center py-2">
+          {gkpSlots.map((item, idx) => {
+            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
+            return (
+              <PlayerCard
+                key={`gkp-${idx}`}
+                player={item?.player}
+                positionSlot={Position.GKP}
+                isStarter={true}
+                isCaptain={item?.isCaptain}
+                isViceCaptain={item?.isViceCaptain}
+                isSelectedForSwap={isSelected}
+                onClick={() => onPlayerClick?.(item?.player || null, Position.GKP, idx)}
+              />
+            );
+          })}
+        </div>
+
+        {/* Row 2: Defenders (DEF) */}
+        <div className="relative z-10 flex justify-around items-center py-2 gap-1 sm:gap-2">
+          {defSlots.map((item, idx) => {
+            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
+            return (
+              <PlayerCard
+                key={`def-${idx}`}
+                player={item?.player}
+                positionSlot={Position.DEF}
+                isStarter={true}
+                isCaptain={item?.isCaptain}
+                isViceCaptain={item?.isViceCaptain}
+                isSelectedForSwap={isSelected}
+                onClick={() => onPlayerClick?.(item?.player || null, Position.DEF, idx)}
+              />
+            );
+          })}
+        </div>
+
+        {/* Row 3: Midfielders (MID) */}
+        <div className="relative z-10 flex justify-around items-center py-2 gap-1 sm:gap-2">
+          {midSlots.map((item, idx) => {
+            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
+            return (
+              <PlayerCard
+                key={`mid-${idx}`}
+                player={item?.player}
+                positionSlot={Position.MID}
+                isStarter={true}
+                isCaptain={item?.isCaptain}
+                isViceCaptain={item?.isViceCaptain}
+                isSelectedForSwap={isSelected}
+                onClick={() => onPlayerClick?.(item?.player || null, Position.MID, idx)}
+              />
+            );
+          })}
+        </div>
+
+        {/* Row 4: Forwards (FWD) */}
+        <div className="relative z-10 flex justify-around items-center py-2 gap-1 sm:gap-2">
+          {fwdSlots.map((item, idx) => {
+            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
+            return (
+              <PlayerCard
+                key={`fwd-${idx}`}
+                player={item?.player}
+                positionSlot={Position.FWD}
+                isStarter={true}
+                isCaptain={item?.isCaptain}
+                isViceCaptain={item?.isViceCaptain}
+                isSelectedForSwap={isSelected}
+                onClick={() => onPlayerClick?.(item?.player || null, Position.FWD, idx)}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
