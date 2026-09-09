@@ -135,6 +135,7 @@ export class FinancialService {
             squadId,
             status: MembershipStatus.ACTIVE,
             paymentStatus: PaymentStatus.PAYMENT_CONFIRMED,
+            hasPaid: true,
           },
         });
       } else if (member.status !== MembershipStatus.ACTIVE) {
@@ -143,6 +144,7 @@ export class FinancialService {
           data: {
             status: MembershipStatus.ACTIVE,
             paymentStatus: PaymentStatus.PAYMENT_CONFIRMED,
+            hasPaid: true,
             squadId,
           },
         });
@@ -351,6 +353,7 @@ export class FinancialService {
         data: {
           paymentStatus: PaymentStatus.PAYMENT_CONFIRMED,
           status: MembershipStatus.ACTIVE,
+          hasPaid: true,
         },
       }),
       this.db.transaction.updateMany({

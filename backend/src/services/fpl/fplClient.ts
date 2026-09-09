@@ -44,6 +44,7 @@ export class FplClient {
           "FantasyXI-App/1.0 (Educational open-source fantasy football project)",
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {
