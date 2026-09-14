@@ -10,7 +10,15 @@ import {
   IconAlertCircle,
   IconShield,
   IconWallet,
+  IconChevronDown,
+  IconChevronUp,
+  IconRefresh,
 } from "@/components/ui/Icons";
+import {
+  isFreighterInstalled,
+  connectFreighter,
+  depositToSorobanEscrow,
+} from "@/lib/stellar/sorobanDeposit";
 
 export interface PaymentModalProps {
   isOpen: boolean;
@@ -24,12 +32,29 @@ export interface PaymentModalProps {
 
 interface PaymentRequirementData {
   leagueId: string;
-  squadId: string;
-  requiredAmount: number;
+  leagueName: string;
+  entryFee: number;
+  assetCode: string;
+  assetIssuer?: string;
   destinationAddress: string;
-  memo: string;
-  status: string;
+  escrowContractId?: string;
+  memo?: string;
+  paymentStatus: string;
 }
+
+type DepositStep =
+  | "idle"
+  | "connecting"
+  | "simulating"
+  | "signing"
+  | "submitting"
+  | "confirming"
+  | "verifying"
+  | "success";
+
+const FALLBACK_ESCROW_CONTRACT_ID =
+  process.env.NEXT_PUBLIC_STELLAR_ESCROW_CONTRACT_ID ||
+  "CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA";
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({
   isOpen,
@@ -41,14 +66,25 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   onPaymentSuccess,
 }) => {
   const [requirement, setRequirement] = useState<PaymentRequirementData | null>(null);
-  const [stellarAddress, setStellarAddress] = useState<string>("");
-  const [stellarTxHash, setStellarTxHash] = useState<string>("");
-
   const [isLoadingReq, setIsLoadingReq] = useState<boolean>(false);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [currentStep, setCurrentStep] = useState<"form" | "submitting" | "verifying" | "success">("form");
+  const [step, setStep] = useState<DepositStep>("idle");
+  const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [hasFreighter, setHasFreighter] = useState<boolean>(true);
+  const [connectedAccount, setConnectedAccount] = useState<string | null>(null);
+  const [confirmedTxHash, setConfirmedTxHash] = useState<string | null>(null);
+
+  // Advanced / manual hash fallback state
+  const [showManualFallback, setShowManualFallback] = useState<boolean>(false);
+  const [manualTxHash, setManualTxHash] = useState<string>("");
+  const [manualAddress, setManualAddress] = useState<string>("");
+  const [isManualVerifying, setIsManualVerifying] = useState<boolean>(false);
+
+  // Check Freighter on mount
+  useEffect(() => {
+    isFreighterInstalled().then((installed) => setHasFreighter(installed));
+  }, []);
 
   // Fetch requirement upon opening
   useEffect(() => {
@@ -57,7 +93,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     async function loadRequirement() {
       setIsLoadingReq(true);
       setErrorMsg(null);
-      setCurrentStep("form");
+      setStep("idle");
       try {
         const res = await api.get<{ success: boolean; data: PaymentRequirementData }>(
           `/api/v1/leagues/${leagueId}/payment-requirement?squadId=${squadId}`
@@ -87,20 +123,111 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const handleSubmitAndVerify = async (e: React.FormEvent) => {
+  const effectiveContractId =
+    requirement?.escrowContractId ||
+    requirement?.destinationAddress ||
+    FALLBACK_ESCROW_CONTRACT_ID;
+
+  /**
+   * Primary canonical flow: deposit via Freighter Soroban invocation
+   */
+  const handleFreighterDeposit = async () => {
+    setErrorMsg(null);
+    setStep("connecting");
+    setStatusMessage("Connecting to Freighter wallet...");
+
+    try {
+      // 1. Connect Freighter
+      const { publicKey, network } = await connectFreighter();
+      setConnectedAccount(publicKey);
+
+      if (network && !network.toUpperCase().includes("TESTNET")) {
+        setErrorMsg(
+          `Freighter is currently set to ${network}. Please switch to Stellar TESTNET in Freighter settings.`
+        );
+        setStep("idle");
+        return;
+      }
+
+      // 2. Deposit into Soroban Escrow
+      setStep("simulating");
+      const depositResult = await depositToSorobanEscrow({
+        escrowContractId: effectiveContractId,
+        leagueId,
+        userPublicKey: publicKey,
+        onProgress: (status) => {
+          setStatusMessage(status);
+          if (status.includes("Simulating")) setStep("simulating");
+          else if (status.includes("signature")) setStep("signing");
+          else if (status.includes("Submitting")) setStep("submitting");
+          else if (status.includes("Confirming")) setStep("confirming");
+        },
+      });
+
+      const txHash = depositResult.txHash;
+      setConfirmedTxHash(txHash);
+
+      // 3. Register transaction with FantasyXI backend
+      setStep("verifying");
+      setStatusMessage("Verifying escrow deposit with FantasyXI backend...");
+
+      await api.post(`/api/v1/leagues/${leagueId}/submit-payment`, {
+        stellarTxHash: txHash,
+        stellarAddress: publicKey,
+      });
+
+      // 4. Confirm verification
+      const verifyRes = await api.post<{
+        success: boolean;
+        message: string;
+        data?: any;
+      }>(`/api/v1/leagues/${leagueId}/verify-payment`, {
+        stellarTxHash: txHash,
+      });
+
+      if (verifyRes?.success) {
+        setStep("success");
+        setTimeout(() => {
+          onPaymentSuccess?.();
+          onClose();
+        }, 2200);
+      } else {
+        throw new Error(
+          verifyRes?.message || "Payment verification failed on backend"
+        );
+      }
+    } catch (err: any) {
+      setStep("idle");
+      const msg = err?.message || String(err);
+      if (msg.includes("User declined") || msg.includes("rejected")) {
+        setErrorMsg("Signature request was rejected in Freighter.");
+      } else if (msg.includes("trustline") || msg.includes("balance")) {
+        setErrorMsg(
+          "Insufficient Testnet USDC balance or missing trustline in Freighter."
+        );
+      } else {
+        setErrorMsg(msg);
+      }
+    }
+  };
+
+  /**
+   * Fallback flow: manual hash submission & verification
+   */
+  const handleManualSubmitAndVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    const cleanHash = stellarTxHash.trim();
-    const cleanAddr = stellarAddress.trim() || requirement?.destinationAddress || "G_DEFAULT_STELLAR_ADDRESS";
+    const cleanHash = manualTxHash.trim();
+    const cleanAddr =
+      manualAddress.trim() || connectedAccount || "G_SUBMITTED_MANUALLY";
 
     if (!cleanHash) {
-      setErrorMsg("Please provide your Stellar transaction hash.");
+      setErrorMsg("Please provide a valid 64-character Stellar transaction hash.");
       return;
     }
 
-    setIsSubmitting(true);
-    setCurrentStep("submitting");
+    setIsManualVerifying(true);
 
     try {
       // 1. Submit payment
@@ -109,38 +236,49 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         stellarAddress: cleanAddr,
       });
 
-      // 2. Verify on-chain payment
-      setCurrentStep("verifying");
-      const verifyRes = await api.post<{ success: boolean; message: string; data?: any }>(
-        `/api/v1/leagues/${leagueId}/verify-payment`,
-        {
-          stellarTxHash: cleanHash,
-        }
-      );
+      // 2. Verify payment
+      const verifyRes = await api.post<{
+        success: boolean;
+        message: string;
+        data?: any;
+      }>(`/api/v1/leagues/${leagueId}/verify-payment`, {
+        stellarTxHash: cleanHash,
+      });
 
       if (verifyRes?.success) {
-        setCurrentStep("success");
+        setStep("success");
+        setConfirmedTxHash(cleanHash);
         setTimeout(() => {
           onPaymentSuccess?.();
           onClose();
-        }, 1800);
+        }, 2000);
       } else {
-        setErrorMsg("Payment verification pending or failed. Please check your transaction.");
-        setCurrentStep("form");
+        setErrorMsg(
+          "Payment verification failed. Please verify the transaction succeeded on Stellar Testnet."
+        );
       }
     } catch (err: unknown) {
-      setCurrentStep("form");
       if (err instanceof ApiError) {
-        setErrorMsg(err.message || "Verification failed. Please check your transaction hash.");
+        setErrorMsg(
+          err.message || "Verification failed. Check your transaction hash."
+        );
       } else if (err instanceof Error) {
         setErrorMsg(err.message);
       } else {
-        setErrorMsg("Failed to communicate with Stellar escrow contract.");
+        setErrorMsg("Failed to communicate with Stellar verification service.");
       }
     } finally {
-      setIsSubmitting(false);
+      setIsManualVerifying(false);
     }
   };
+
+  const isWorking =
+    step === "connecting" ||
+    step === "simulating" ||
+    step === "signing" ||
+    step === "submitting" ||
+    step === "confirming" ||
+    step === "verifying";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fadeIn">
@@ -153,7 +291,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-white uppercase tracking-tight">
-                USDC Escrow Payment
+                Soroban Escrow Deposit
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">{leagueName}</p>
             </div>
@@ -162,7 +300,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            disabled={isWorking}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-50"
           >
             <IconClose className="w-5 h-5" />
           </button>
@@ -173,17 +312,26 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {isLoadingReq ? (
             <div className="py-12 text-center text-slate-400">
               <div className="inline-block w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3" />
-              <p className="text-xs">Generating Soroban escrow requirement...</p>
+              <p className="text-xs">Connecting to Soroban escrow contract...</p>
             </div>
-          ) : currentStep === "success" ? (
-            <div className="py-8 text-center space-y-3">
-              <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
-                <IconCheck className="w-8 h-8" />
+          ) : step === "success" ? (
+            <div className="py-8 text-center space-y-4 animate-fadeIn">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
+                <IconCheck className="w-9 h-9" />
               </div>
-              <h3 className="text-lg font-bold text-white">Payment Confirmed!</h3>
-              <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                Your entry fee is secured in Soroban escrow. Your squad is now active in {leagueName}!
-              </p>
+              <div>
+                <h3 className="text-lg font-bold text-white">Deposit Confirmed!</h3>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                  Your entry fee of {requirement?.entryFee ?? entryFee} USDC is now
+                  secured in the Soroban escrow smart contract. Your squad is ACTIVE
+                  in {leagueName}.
+                </p>
+              </div>
+              {confirmedTxHash && (
+                <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-400 max-w-sm mx-auto break-all">
+                  Tx: {confirmedTxHash}
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -201,128 +349,161 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     Required Entry Fee
                   </div>
                   <div className="text-2xl font-black text-emerald-400 font-mono mt-0.5">
-                    {requirement?.requiredAmount ?? entryFee} USDC
+                    {requirement?.entryFee ?? entryFee} USDC
                   </div>
                 </div>
-                <div className="text-right text-[11px] text-slate-500">
-                  <span>Stellar Testnet</span>
-                  <div className="font-mono text-xs text-slate-400">USDC Asset</div>
+                <div className="text-right text-[11px] text-slate-400 space-y-0.5">
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-semibold text-[10px] border border-emerald-500/20">
+                    Stellar Testnet
+                  </span>
+                  <div className="font-mono text-xs text-slate-300">Soroban Contract</div>
                 </div>
               </div>
 
-              {/* Escrow Vault Details */}
-              <div className="space-y-3 text-xs">
-                {/* Destination Address */}
-                <div>
-                  <div className="flex items-center justify-between text-slate-400 font-semibold mb-1">
-                    <span>Escrow Destination Address</span>
-                    {copiedField === "address" && (
-                      <span className="text-emerald-400 text-[10px]">Copied!</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={requirement?.destinationAddress || "Pending generation..."}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded text-slate-300 font-mono text-[11px] focus:outline-none"
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() =>
-                        copyToClipboard(requirement?.destinationAddress || "", "address")
-                      }
-                      title="Copy Address"
-                    >
-                      <IconCopy className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
+              {/* Escrow Contract Address */}
+              <div className="space-y-1.5 text-xs">
+                <div className="flex items-center justify-between text-slate-400 font-semibold">
+                  <span>Escrow Contract ID</span>
+                  {copiedField === "contract" && (
+                    <span className="text-emerald-400 text-[10px]">Copied!</span>
+                  )}
                 </div>
-
-                {/* Memo */}
-                <div>
-                  <div className="flex items-center justify-between text-slate-400 font-semibold mb-1">
-                    <span>Required Transaction Memo (Text)</span>
-                    {copiedField === "memo" && (
-                      <span className="text-emerald-400 text-[10px]">Copied!</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={requirement?.memo || "Pending..."}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded text-emerald-400 font-mono text-[11px] font-bold focus:outline-none"
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => copyToClipboard(requirement?.memo || "", "memo")}
-                      title="Copy Memo"
-                    >
-                      <IconCopy className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                  <p className="text-[10px] text-amber-400 mt-1">
-                    &bull; You MUST include this memo in your Stellar transfer to match your payment.
-                  </p>
-                </div>
-              </div>
-
-              {/* Submit Payment Form */}
-              <form onSubmit={handleSubmitAndVerify} className="space-y-3 pt-2 border-t border-slate-800">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Your Stellar Address / Public Key
-                  </label>
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
-                    value={stellarAddress}
-                    onChange={(e) => setStellarAddress(e.target.value)}
-                    placeholder="e.g. GAB7... (or your Freighter wallet address)"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700/80 rounded-lg text-slate-200 text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                    readOnly
+                    value={effectiveContractId}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-300 font-mono text-[11px] focus:outline-none"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Stellar Transaction Hash <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={stellarTxHash}
-                    onChange={(e) => setStellarTxHash(e.target.value)}
-                    placeholder="64-character hex transaction hash"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700/80 rounded-lg text-slate-200 text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div className="pt-2">
                   <Button
-                    type="submit"
-                    variant="primary"
-                    size="lg"
-                    isLoading={isSubmitting}
-                    disabled={isSubmitting || !stellarTxHash.trim()}
-                    className="w-full justify-center uppercase font-bold tracking-wide text-xs"
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => copyToClipboard(effectiveContractId, "contract")}
+                    title="Copy Escrow Contract ID"
                   >
-                    {currentStep === "verifying"
-                      ? "Verifying On-Chain..."
-                      : "Submit & Verify Payment"}
+                    <IconCopy className="w-3.5 h-3.5" />
                   </Button>
                 </div>
-              </form>
+              </div>
+
+              {/* Status / In Progress Display */}
+              {isWorking && (
+                <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-center space-y-2">
+                  <div className="inline-block w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs font-semibold text-emerald-300">{statusMessage}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {step === "signing"
+                      ? "Please review and approve the transaction in the Freighter popup."
+                      : "Please wait while your transaction is processed on the Stellar ledger."}
+                  </p>
+                </div>
+              )}
+
+              {/* Primary Freighter Deposit Action */}
+              {!isWorking && (
+                <div className="space-y-2.5 pt-1">
+                  {!hasFreighter && (
+                    <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
+                      <span>Freighter extension not detected.</span>
+                      <a
+                        href="https://www.freighter.app"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-400 underline font-semibold hover:text-emerald-300"
+                      >
+                        Install Freighter
+                      </a>
+                    </div>
+                  )}
+
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="lg"
+                    onClick={handleFreighterDeposit}
+                    disabled={isWorking}
+                    className="w-full justify-center uppercase font-bold tracking-wide text-xs py-3.5"
+                  >
+                    <IconWallet className="w-4 h-4 mr-2" />
+                    Pay {requirement?.entryFee ?? entryFee} USDC with Freighter
+                  </Button>
+                  <p className="text-[11px] text-slate-500 text-center">
+                    Invokes <code className="text-emerald-400">deposit(participant, league_id)</code> directly on the Soroban smart contract.
+                  </p>
+                </div>
+              )}
+
+              {/* Collapsible Manual Verification Section */}
+              <div className="pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowManualFallback(!showManualFallback)}
+                  className="w-full flex items-center justify-between text-[11px] text-slate-400 hover:text-slate-200 transition-colors py-1"
+                >
+                  <span className="font-semibold uppercase tracking-wider">
+                    Advanced: Manual Hash Verification
+                  </span>
+                  {showManualFallback ? (
+                    <IconChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <IconChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </button>
+
+                {showManualFallback && (
+                  <form
+                    onSubmit={handleManualSubmitAndVerify}
+                    className="mt-3 space-y-3 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 animate-fadeIn"
+                  >
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                        Your Stellar Public Key (G...)
+                      </label>
+                      <input
+                        type="text"
+                        value={manualAddress}
+                        onChange={(e) => setManualAddress(e.target.value)}
+                        placeholder="e.g. GA..."
+                        className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                        Stellar Transaction Hash <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={manualTxHash}
+                        onChange={(e) => setManualTxHash(e.target.value)}
+                        placeholder="64-character hex transaction hash"
+                        className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <Button
+                      type="submit"
+                      variant="secondary"
+                      size="sm"
+                      isLoading={isManualVerifying}
+                      disabled={isManualVerifying || !manualTxHash.trim()}
+                      className="w-full justify-center text-xs font-semibold"
+                    >
+                      Verify Transaction Hash
+                    </Button>
+                  </form>
+                )}
+              </div>
             </>
           )}
         </div>
 
         {/* Footer info */}
-        <div className="p-3.5 border-t border-pitch-border bg-slate-950/80 text-center text-[11px] text-slate-500">
-          Funds held transparently in Soroban smart contract escrow &bull; Testnet USDC
+        <div className="p-3.5 border-t border-pitch-border bg-slate-950/80 text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5">
+          <IconShield className="w-3.5 h-3.5 text-emerald-500/80" />
+          <span>Non-custodial Soroban escrow &bull; 100% on-chain verifiable</span>
         </div>
       </div>
     </div>
