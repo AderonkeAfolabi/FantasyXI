@@ -184,6 +184,7 @@ export class FinancialService {
       assetIssuer: stellarConfig.usdcIssuer,
       destinationAddress:
         stellarConfig.escrowContractId || stellarConfig.treasuryAddress,
+      escrowContractId: stellarConfig.escrowContractId,
       memo,
       paymentStatus: member.paymentStatus,
     };
@@ -325,6 +326,7 @@ export class FinancialService {
       expectedAmount: member.league.entryFee,
       expectedMemo,
       expectedSender: member.stellarAddress || undefined,
+      expectedLeagueId: leagueId,
     });
 
     if (!verification.success) {

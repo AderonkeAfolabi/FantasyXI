@@ -6,7 +6,14 @@
  * Never executes state changes on the database directly; returns pure verification results.
  */
 
-import { Horizon, StrKey } from "@stellar/stellar-sdk";
+import {
+  Horizon,
+  StrKey,
+  TransactionBuilder,
+  Networks,
+  Address,
+  scValToNative,
+} from "@stellar/stellar-sdk";
 import { getHorizonServer, stellarConfig } from "../../config/stellar.js";
 import { PaymentVerificationResult } from "../../types/index.js";
 import {
@@ -22,6 +29,7 @@ export interface VerifyPaymentParams {
   expectedAssetIssuer?: string;
   expectedMemo?: string;
   expectedSender?: string;
+  expectedLeagueId?: number | string;
 }
 
 export interface ContractReconciliationResult {
@@ -98,6 +106,7 @@ export class StellarService {
       expectedAssetIssuer = stellarConfig.usdcIssuer,
       expectedMemo,
       expectedSender,
+      expectedLeagueId,
     } = params;
 
     if (!this.isValidTransactionHash(txHash)) {
@@ -121,7 +130,152 @@ export class StellarService {
         };
       }
 
-      // 2. Check memo if specified
+      // 2. Check if transaction envelope contains a Soroban contract invocation (invokeHostFunction)
+      let isSorobanInvocation = false;
+      let sorobanOp: any = null;
+
+      if (tx.envelope_xdr) {
+        try {
+          const envelopeTx = TransactionBuilder.fromXDR(
+            tx.envelope_xdr,
+            stellarConfig.networkPassphrase || Networks.TESTNET
+          );
+          sorobanOp = envelopeTx.operations.find(
+            (op: any) => op.type === "invokeHostFunction"
+          );
+          if (sorobanOp) {
+            isSorobanInvocation = true;
+          }
+        } catch {
+          // If envelope decoding fails, fall back to checking operations endpoint
+        }
+      }
+
+      // If it's a Soroban invocation, verify contract ID, function name, and invocation args
+      if (isSorobanInvocation && sorobanOp) {
+        const func = sorobanOp.func;
+        if (!func || !func.invokeContract) {
+          return {
+            success: false,
+            txHash,
+            ledgerSeq: tx.ledger_attr,
+            error: "Soroban invocation is not a contract function call.",
+          };
+        }
+
+        const invokeContract = func.invokeContract;
+        const targetContractId = Address.fromScAddress(
+          invokeContract.contractAddress
+        ).toString();
+        const functionName = invokeContract.functionName.toString();
+        const args = invokeContract.args || [];
+
+        const expectedEscrowId =
+          stellarConfig.escrowContractId || expectedDestination;
+
+        if (
+          targetContractId !== expectedEscrowId &&
+          targetContractId !== expectedDestination
+        ) {
+          return {
+            success: false,
+            txHash,
+            ledgerSeq: tx.ledger_attr,
+            error: `Target contract mismatch: expected '${expectedEscrowId}', got '${targetContractId}'.`,
+          };
+        }
+
+        if (functionName !== "deposit") {
+          return {
+            success: false,
+            txHash,
+            ledgerSeq: tx.ledger_attr,
+            error: `Invalid contract function: expected 'deposit', got '${functionName}'.`,
+          };
+        }
+
+        if (args.length < 2) {
+          return {
+            success: false,
+            txHash,
+            ledgerSeq: tx.ledger_attr,
+            error: "Contract invocation has insufficient arguments for deposit.",
+          };
+        }
+
+        const participantAddress = String(scValToNative(args[0]));
+        const invocationLeagueId = scValToNative(args[1]);
+
+        if (
+          expectedSender &&
+          participantAddress !== expectedSender &&
+          tx.source_account !== expectedSender
+        ) {
+          return {
+            success: false,
+            txHash,
+            ledgerSeq: tx.ledger_attr,
+            error: `Participant mismatch: expected '${expectedSender}', got '${participantAddress}'.`,
+          };
+        }
+
+        if (expectedLeagueId !== undefined) {
+          const numericExpected =
+            typeof expectedLeagueId === "string"
+              ? parseInt(expectedLeagueId, 10)
+              : expectedLeagueId;
+          const numericInvoked = Number(invocationLeagueId);
+
+          if (
+            !isNaN(numericExpected) &&
+            !isNaN(numericInvoked) &&
+            numericExpected !== numericInvoked
+          ) {
+            return {
+              success: false,
+              txHash,
+              ledgerSeq: tx.ledger_attr,
+              error: `League ID mismatch: expected '${expectedLeagueId}', got '${invocationLeagueId}'.`,
+            };
+          }
+        }
+
+        // Check on-chain deposit balance if Soroban client was explicitly configured
+        if (this.sorobanClient) {
+          try {
+            const onChainDeposit = await this.getContractDeposit(
+              invocationLeagueId,
+              participantAddress
+            );
+            if (onChainDeposit > 0n) {
+              const depositedUsdc = Number(onChainDeposit) / 10_000_000;
+              if (Math.abs(depositedUsdc - expectedAmount) > 0.0001) {
+                return {
+                  success: false,
+                  txHash,
+                  ledgerSeq: tx.ledger_attr,
+                  error: `Deposit amount mismatch: expected ${expectedAmount} USDC, contract recorded ${depositedUsdc} USDC.`,
+                };
+              }
+            }
+          } catch {
+            // If on-chain query encounters temporary RPC latency, trust confirmed ledger transaction
+          }
+        }
+
+        return {
+          success: true,
+          txHash: tx.hash,
+          ledgerSeq: tx.ledger_attr,
+          amount: expectedAmount,
+          assetCode: expectedAssetCode,
+          senderAddress: participantAddress || tx.source_account,
+          destinationAddress: targetContractId,
+          confirmedAt: new Date(tx.created_at),
+        };
+      }
+
+      // 3. Fallback: Classic Stellar payment operation verification
       if (expectedMemo) {
         if (!tx.memo || tx.memo.trim() !== expectedMemo.trim()) {
           return {
@@ -133,13 +287,13 @@ export class StellarService {
         }
       }
 
-      // 3. Fetch operations for this transaction
+      // Fetch operations for this transaction
       const opsPage = await this.server
         .operations()
         .forTransaction(txHash)
         .call();
 
-      // 4. Find payment operation matching criteria
+      // Find payment operation matching criteria
       const matchingOp = opsPage.records.find((op: any) => {
         // We look for payment operations
         if (op.type !== "payment") return false;

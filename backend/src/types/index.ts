@@ -252,6 +252,7 @@ export interface PaymentRequirement {
   assetCode: string; // e.g. "USDC"
   assetIssuer?: string;
   destinationAddress: string; // Escrow contract or platform treasury address
+  escrowContractId?: string;
   memo: string; // Deterministic identifier (e.g. "LEAGUE:<id>:USER:<id>")
   paymentStatus: PaymentStatus;
 }

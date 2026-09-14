@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import {
+  Keypair,
+  StrKey,
+  Contract,
+  Address,
+  nativeToScVal,
+  TransactionBuilder,
+  Networks,
+  Account,
+} from "@stellar/stellar-sdk";
 import { StellarService } from "../services/financial/stellarService.js";
 
 // Generate deterministic test keypairs
@@ -419,6 +428,197 @@ describe("StellarService Abstraction & Validation", () => {
         },
         /League 999 not found on Soroban contract/
       );
+    });
+  });
+
+  describe("Soroban Contract Invocation Verification (invokeHostFunction)", () => {
+    const TEST_ESCROW_CONTRACT =
+      "CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA";
+    const OTHER_CONTRACT =
+      Address.contract(Buffer.alloc(32, 1)).toString();
+
+    function buildMockSorobanDepositEnvelope(params: {
+      contractId: string;
+      sourceKp: Keypair;
+      participantAddress: string;
+      leagueId: bigint;
+      functionName?: string;
+    }) {
+      const contract = new Contract(params.contractId);
+      const account = new Account(params.sourceKp.publicKey(), "100");
+      const op = contract.call(
+        params.functionName || "deposit",
+        new Address(params.participantAddress).toScVal(),
+        nativeToScVal(params.leagueId, { type: "u64" })
+      );
+      const tx = new TransactionBuilder(account, {
+        fee: "100",
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(op)
+        .setTimeout(60)
+        .build();
+      return tx.toXDR();
+    }
+
+    it("should successfully verify a valid Soroban deposit transaction", async () => {
+      const xdr = buildMockSorobanDepositEnvelope({
+        contractId: TEST_ESCROW_CONTRACT,
+        sourceKp: senderKp,
+        participantAddress: senderKp.publicKey(),
+        leagueId: 101n,
+      });
+
+      const mockServer = createMockServer({
+        txRecord: {
+          hash: VALID_TX_HASH,
+          successful: true,
+          ledger_attr: 1234567,
+          created_at: "2026-09-04T12:00:00Z",
+          source_account: senderKp.publicKey(),
+          envelope_xdr: xdr,
+        },
+      });
+
+      const service = new StellarService(mockServer);
+
+      const result = await service.verifyPaymentTransaction({
+        txHash: VALID_TX_HASH,
+        expectedDestination: TEST_ESCROW_CONTRACT,
+        expectedAmount: 10.0,
+        expectedSender: senderKp.publicKey(),
+        expectedLeagueId: 101,
+      });
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.txHash, VALID_TX_HASH);
+      assert.strictEqual(result.amount, 10.0);
+      assert.strictEqual(result.destinationAddress, TEST_ESCROW_CONTRACT);
+      assert.strictEqual(result.senderAddress, senderKp.publicKey());
+      assert.strictEqual(result.ledgerSeq, 1234567);
+      assert.ok(result.confirmedAt instanceof Date);
+    });
+
+    it("should reject a Soroban invocation with wrong function name", async () => {
+      const xdr = buildMockSorobanDepositEnvelope({
+        contractId: TEST_ESCROW_CONTRACT,
+        sourceKp: senderKp,
+        participantAddress: senderKp.publicKey(),
+        leagueId: 101n,
+        functionName: "withdraw",
+      });
+
+      const mockServer = createMockServer({
+        txRecord: {
+          hash: VALID_TX_HASH,
+          successful: true,
+          ledger_attr: 1234567,
+          envelope_xdr: xdr,
+        },
+      });
+
+      const service = new StellarService(mockServer);
+
+      const result = await service.verifyPaymentTransaction({
+        txHash: VALID_TX_HASH,
+        expectedDestination: TEST_ESCROW_CONTRACT,
+        expectedAmount: 10.0,
+        expectedLeagueId: 101,
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error!, /Invalid contract function: expected 'deposit'/);
+    });
+
+    it("should reject a Soroban invocation targeting wrong contract", async () => {
+      const xdr = buildMockSorobanDepositEnvelope({
+        contractId: OTHER_CONTRACT,
+        sourceKp: senderKp,
+        participantAddress: senderKp.publicKey(),
+        leagueId: 101n,
+      });
+
+      const mockServer = createMockServer({
+        txRecord: {
+          hash: VALID_TX_HASH,
+          successful: true,
+          ledger_attr: 1234567,
+          envelope_xdr: xdr,
+        },
+      });
+
+      const service = new StellarService(mockServer);
+
+      const result = await service.verifyPaymentTransaction({
+        txHash: VALID_TX_HASH,
+        expectedDestination: TEST_ESCROW_CONTRACT,
+        expectedAmount: 10.0,
+        expectedLeagueId: 101,
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error!, /Target contract mismatch/);
+    });
+
+    it("should reject a Soroban deposit with mismatched league ID", async () => {
+      const xdr = buildMockSorobanDepositEnvelope({
+        contractId: TEST_ESCROW_CONTRACT,
+        sourceKp: senderKp,
+        participantAddress: senderKp.publicKey(),
+        leagueId: 999n,
+      });
+
+      const mockServer = createMockServer({
+        txRecord: {
+          hash: VALID_TX_HASH,
+          successful: true,
+          ledger_attr: 1234567,
+          envelope_xdr: xdr,
+        },
+      });
+
+      const service = new StellarService(mockServer);
+
+      const result = await service.verifyPaymentTransaction({
+        txHash: VALID_TX_HASH,
+        expectedDestination: TEST_ESCROW_CONTRACT,
+        expectedAmount: 10.0,
+        expectedLeagueId: 101,
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error!, /League ID mismatch/);
+    });
+
+    it("should reject a Soroban deposit with mismatched participant sender", async () => {
+      const xdr = buildMockSorobanDepositEnvelope({
+        contractId: TEST_ESCROW_CONTRACT,
+        sourceKp: senderKp,
+        participantAddress: wrongDestinationKp.publicKey(),
+        leagueId: 101n,
+      });
+
+      const mockServer = createMockServer({
+        txRecord: {
+          hash: VALID_TX_HASH,
+          successful: true,
+          ledger_attr: 1234567,
+          envelope_xdr: xdr,
+        },
+      });
+
+      const service = new StellarService(mockServer);
+
+      const result = await service.verifyPaymentTransaction({
+        txHash: VALID_TX_HASH,
+        expectedDestination: TEST_ESCROW_CONTRACT,
+        expectedAmount: 10.0,
+        expectedSender: senderKp.publicKey(),
+        expectedLeagueId: 101,
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error!, /Participant mismatch/);
     });
   });
 });
