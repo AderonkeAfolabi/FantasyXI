@@ -1,0 +1,115 @@
+[
+  {
+    "step": "1. On-Chain League Creation",
+    "success": true,
+    "details": {
+      "leagueId": 401247,
+      "escrowContractId": "CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA",
+      "creator": "GC43IGCUMQYECKMRKGSJE2RPQPJ2QNHFB6VAHNNBO4NONKK3PVHEXN25",
+      "entryFeeStroops": "100000000",
+      "entryFeeUsdc": 10,
+      "participantCount": 0,
+      "status": "Upcoming (0)"
+    },
+    "timestamp": "2026-09-14T13:41:00.899Z"
+  },
+  {
+    "step": "2. Manager A Soroban Escrow Deposit",
+    "success": true,
+    "details": {
+      "leagueId": 401247,
+      "participant": "GB6NK5ADHWBD7RMCVWHLMNS4TEL7WTM3CVNCP7G34GREDHCPBQKHT5RY",
+      "amountUsdc": 10,
+      "txHash": "6754854a3a704f4343974f8a106b2f834bafb9c5e5f0b60c5edd97a336867856"
+    },
+    "timestamp": "2026-09-14T13:41:14.513Z"
+  },
+  {
+    "step": "3. Backend Independent Verification (Manager A)",
+    "success": true,
+    "details": {
+      "txHash": "6754854a3a704f4343974f8a106b2f834bafb9c5e5f0b60c5edd97a336867856",
+      "ledgerSeq": 4673937,
+      "amount": 10,
+      "assetCode": "USDC",
+      "senderAddress": "GB6NK5ADHWBD7RMCVWHLMNS4TEL7WTM3CVNCP7G34GREDHCPBQKHT5RY",
+      "destinationAddress": "CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA",
+      "confirmedAt": "2026-09-14T13:41:12.000Z"
+    },
+    "timestamp": "2026-09-14T13:41:16.020Z"
+  },
+  {
+    "step": "4A. Guard Check: Mismatched League ID Rejection",
+    "success": true,
+    "details": {
+      "txHash": "6754854a3a704f4343974f8a106b2f834bafb9c5e5f0b60c5edd97a336867856",
+      "expectedLeagueId": 999999,
+      "actualLeagueId": 401247,
+      "rejectedAsExpected": true,
+      "error": "League ID mismatch: expected '999999', got '401247'."
+    },
+    "timestamp": "2026-09-14T13:41:16.350Z"
+  },
+  {
+    "step": "4B. Guard Check: Mismatched Participant Rejection",
+    "success": true,
+    "details": {
+      "txHash": "6754854a3a704f4343974f8a106b2f834bafb9c5e5f0b60c5edd97a336867856",
+      "expectedSender": "GAEWHM3ZPNIUOXP2RRAQWINUDLLUVMWLUBCD5ZMK2MR5QP3IQA47LWYK",
+      "actualSender": "GB6NK5ADHWBD7RMCVWHLMNS4TEL7WTM3CVNCP7G34GREDHCPBQKHT5RY",
+      "rejectedAsExpected": true,
+      "error": "Participant mismatch: expected 'GAEWHM3ZPNIUOXP2RRAQWINUDLLUVMWLUBCD5ZMK2MR5QP3IQA47LWYK', got 'GB6NK5ADHWBD7RMCVWHLMNS4TEL7WTM3CVNCP7G34GREDHCPBQKHT5RY'."
+    },
+    "timestamp": "2026-09-14T13:41:16.649Z"
+  },
+  {
+    "step": "5. On-Chain Duplicate Deposit Prevention",
+    "success": true,
+    "details": {
+      "leagueId": 401247,
+      "participant": "GB6NK5ADHWBD7RMCVWHLMNS4TEL7WTM3CVNCP7G34GREDHCPBQKHT5RY",
+      "rejectedAsExpected": true,
+      "contractError": "❌ error: transaction simulation failed: HostError: Error(Contract, #6)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA, topics:[error, Error(Contract, #6)], data:\"escalating Ok(ScErrorType::Contract) frame-exit to Err\"\n   1: [Diagnostic Event] topics:[fn_call, CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA, deposit], data:[GB6NK5ADHWBD7RMCVWHLMNS4TEL7WTM3CVNCP7G34GREDHCPBQKHT5RY, 401247]",
+      "expectedErrorCode": "AlreadyDeposited (#6)"
+    },
+    "timestamp": "2026-09-14T13:41:18.465Z"
+  },
+  {
+    "step": "6. Full Escrow Pool State Verification",
+    "success": true,
+    "details": {
+      "leagueId": 401247,
+      "participantCount": 3,
+      "totalDepositedStroops": "300000000",
+      "totalDepositedUsdc": 30,
+      "allVerificationsPassed": true
+    },
+    "timestamp": "2026-09-14T13:41:42.174Z"
+  },
+  {
+    "step": "7. On-Chain Settlement & Payout Execution",
+    "success": true,
+    "details": {
+      "leagueId": 401247,
+      "settleTxHash": "2d0dd957ee5f731af4f67beb25fac527982c6cbab298e211653bcbf8f12dc569",
+      "statusAfterSettlement": "Settled (2)",
+      "escrowPayoutStroops": "300000000",
+      "escrowPayoutUsdc": 30,
+      "managerAGainUsdc": 17.1,
+      "managerBGainUsdc": 8.55,
+      "managerCGainUsdc": 2.85
+    },
+    "timestamp": "2026-09-14T13:42:08.508Z"
+  },
+  {
+    "step": "8. Terminal State Guard: Double Settlement Prevention",
+    "success": true,
+    "details": {
+      "leagueId": 401247,
+      "rejectedAsExpected": true,
+      "contractError": "❌ error: transaction simulation failed: HostError: Error(Contract, #7)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA, topics:[error, Error(Contract, #7)], data:\"escalating Ok(ScErrorType::Contract) frame-exit to Err\"\n   1: [Diagnostic Event] topics:[fn_call, CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA, settle], data:[GC43IGCUMQYECKMRKGSJE2RPQPJ2QNHFB6VAHNNBO4NONKK3PVHEXN25, 401247, [{amount: 171000000, winner: GB6NK5ADHWBD7RMCVWHLMNS4TEL7WTM3CVNCP7G34GREDHCPBQKHT5RY}, {amount: 85500000, winner: GAEWHM3ZPNIUOXP2RRAQWINUDLLUVMWLUBCD5ZMK2MR5QP3IQA47LWYK}, {amount: 28500000, winner: GDH2GRO3BLOFR6H53VYFW2HEIPQKRHKUTNQ6WLH4NUBFTLKF6VDGZO76}], GC43IGCUMQYECKMRKGSJE2RPQPJ2QNHFB6VAHNNBO4NONKK3PVHEXN25, 15000000]",
+      "expectedErrorCode": "AlreadySettled (#7)"
+    },
+    "timestamp": "2026-09-14T13:42:10.681Z"
+  }
+]
