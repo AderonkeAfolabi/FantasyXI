@@ -172,7 +172,7 @@ async function main() {
   // Guard C: On-chain duplicate deposit rejection
   console.log(`5. Testing on-chain duplicate deposit prevention...`);
   const dupDeposit = await client.deposit(managerASecret, managerAPublic, leagueId);
-  const isDupRejected = !dupDeposit.success && dupDeposit.error?.includes("Error(Contract, #6)");
+  const isDupRejected = Boolean(!dupDeposit.success && dupDeposit.error?.includes("Error(Contract, #6)"));
 
   recordEvidence("5. On-Chain Duplicate Deposit Prevention", isDupRejected, {
     leagueId,
@@ -276,7 +276,7 @@ async function main() {
     feeStroops
   );
 
-  const isDoubleSettleBlocked = !doubleSettle.success && doubleSettle.error?.includes("Error(Contract, #7)");
+  const isDoubleSettleBlocked = Boolean(!doubleSettle.success && doubleSettle.error?.includes("Error(Contract, #7)"));
   recordEvidence("8. Terminal State Guard: Double Settlement Prevention", isDoubleSettleBlocked, {
     leagueId,
     rejectedAsExpected: !doubleSettle.success,
