@@ -6,6 +6,7 @@ import {
   LeagueForbiddenError,
 } from "../services/league/leagueService.js";
 import { LeagueStatus } from "../types/index.js";
+import { liveService } from "../services/live/liveService.js";
 
 /**
  * League Controller.
@@ -279,6 +280,55 @@ export async function cancelLeague(
       });
       return;
     }
+    next(error);
+  }
+}
+
+/**
+ * GET /api/v1/leagues/:id/live — Server-Sent Events stream of live matchday snapshots.
+ * Pushes a snapshot on connect and every LIVE_FEED_INTERVAL_MS (default 15s).
+ */
+export async function streamLeagueLive(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const leagueId = req.params.id as string;
+
+  try {
+    const first = await liveService.getLeagueSnapshot(leagueId);
+    if (!first) {
+      res.status(404).json({
+        success: false,
+        message: `League with ID ${leagueId} was not found`,
+      });
+      return;
+    }
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const send = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    send("snapshot", first);
+
+    const intervalMs = Number(process.env.LIVE_FEED_INTERVAL_MS) || 15_000;
+    const timer = setInterval(async () => {
+      try {
+        const snapshot = await liveService.getLeagueSnapshot(leagueId);
+        if (snapshot) send("snapshot", snapshot);
+      } catch (error) {
+        send("feed-error", { message: (error as Error).message });
+      }
+    }, intervalMs);
+
+    req.on("close", () => clearInterval(timer));
+  } catch (error) {
     next(error);
   }
 }

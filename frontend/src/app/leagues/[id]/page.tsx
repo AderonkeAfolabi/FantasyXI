@@ -15,6 +15,9 @@ import {
 import { StandingsTable } from "@/components/leagues/StandingsTable";
 import { PrizeCalculator } from "@/components/leagues/PrizeCalculator";
 import { PaymentModal } from "@/components/leagues/PaymentModal";
+import { LiveMatchdayBar } from "@/components/live/LiveMatchdayBar";
+import { LiveSquadModal } from "@/components/live/LiveSquadModal";
+import { useLiveLeague } from "@/components/live/useLiveLeague";
 import { LeagueStatusBadge, Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import {
@@ -49,6 +52,13 @@ export default function LeagueDetailPage({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+  const [liveSquadUserId, setLiveSquadUserId] = useState<string | null>(null);
+
+  // Live matchday feed (SSE) while the competition is running
+  const { snapshot, rankChanges, freshEventKeys, connection } = useLiveLeague(
+    leagueId,
+    league?.status === LeagueStatus.ACTIVE
+  );
 
   // Load league data, standings, and user squads
   const loadLeagueData = async () => {
@@ -62,11 +72,12 @@ export default function LeagueDetailPage({
       }
 
       // 2. Fetch standings
-      const stdRes = await api.get<{ success: boolean; data: LeagueStandingsEntry[] }>(
-        `/api/v1/leagues/${leagueId}/standings`
-      );
+      const stdRes = await api.get<{
+        success: boolean;
+        data: LeagueStandingsEntry[] | { standings: LeagueStandingsEntry[] };
+      }>(`/api/v1/leagues/${leagueId}/standings`);
       if (stdRes?.data) {
-        setStandings(stdRes.data);
+        setStandings(Array.isArray(stdRes.data) ? stdRes.data : stdRes.data.standings);
       }
 
       // 3. Fetch user's squads if logged in
@@ -142,6 +153,32 @@ export default function LeagueDetailPage({
       setIsJoining(false);
     }
   };
+
+  // Live standings replace the static table while the feed is streaming
+  const liveStandings = snapshot?.standings ?? [];
+  const displayStandings: LeagueStandingsEntry[] =
+    liveStandings.length > 0
+      ? liveStandings.map((live) => {
+          const base = standings.find((s) => s.userId === live.userId);
+          return {
+            bestGameweekPoints: base?.bestGameweekPoints ?? 0,
+            gameweekScores: base?.gameweekScores ?? [],
+            joinedAt: base?.joinedAt ?? "",
+            rank: live.rank,
+            userId: live.userId,
+            username: live.username,
+            squadId: live.squadId,
+            squadName: live.squadName,
+            membershipStatus: live.membershipStatus,
+            totalPoints: live.totalPoints,
+          };
+        })
+      : standings;
+  const livePoints =
+    liveStandings.length > 0
+      ? Object.fromEntries(liveStandings.map((s) => [s.userId, s.livePoints]))
+      : undefined;
+  const liveSquadEntry = liveStandings.find((s) => s.userId === liveSquadUserId);
 
   // Check if current user is already a member
   const myEntry = user ? standings.find((s) => s.userId === user.id) : null;
@@ -347,6 +384,15 @@ export default function LeagueDetailPage({
         </div>
       )}
 
+      {/* Live matchday: fixtures, clock and event ticker */}
+      {league.status === LeagueStatus.ACTIVE && (
+        <LiveMatchdayBar
+          snapshot={snapshot}
+          connection={connection}
+          freshEventKeys={freshEventKeys}
+        />
+      )}
+
       {/* Main Grid: Standings + Prize Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left 2 Cols: Standings Table */}
@@ -359,7 +405,9 @@ export default function LeagueDetailPage({
                   <span>League Standings</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Leaderboard updated after each gameweek resolution
+                  {livePoints
+                    ? "Live leaderboard · click a manager to see their live squad"
+                    : "Leaderboard updated after each gameweek resolution"}
                 </p>
               </div>
 
@@ -369,10 +417,13 @@ export default function LeagueDetailPage({
             </div>
 
             <StandingsTable
-              standings={standings}
+              standings={displayStandings}
               entryFee={league.entryFee}
               prizePool={league.prizePool}
               currentUserId={user?.id}
+              livePoints={livePoints}
+              rankChanges={rankChanges}
+              onSelectEntry={livePoints ? setLiveSquadUserId : undefined}
             />
           </div>
         </div>
@@ -395,6 +446,11 @@ export default function LeagueDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Live squad points */}
+      {liveSquadEntry && (
+        <LiveSquadModal entry={liveSquadEntry} onClose={() => setLiveSquadUserId(null)} />
+      )}
 
       {/* USDC Payment Modal */}
       {showPaymentModal && myEntry && (

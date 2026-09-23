@@ -171,6 +171,8 @@ model Player {
   team          Team                  @relation(fields: [teamId], references: [id])
   squadPlayers  SquadPlayer[]
   gameweekStats PlayerGameweekStats[]
+  transfersIn   SquadTransfer[]       @relation("TransferIn")
+  transfersOut  SquadTransfer[]       @relation("TransferOut")
 
   @@map("players")
 }
@@ -252,6 +254,9 @@ model Squad {
   name            String
   budgetRemaining Decimal  @default(100.0) @map("budget_remaining") @db.Decimal(5, 1)
   totalPoints     Int      @default(0) @map("total_points")
+  /// Free transfers left for freeTransfersGameweekId (rolls over +1 per gameweek)
+  freeTransfers           Int      @default(1) @map("free_transfers")
+  freeTransfersGameweekId Int?     @map("free_transfers_gameweek_id")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -367,6 +372,28 @@ model SquadGameweekScore {
 
   @@unique([squadId, gameweekId])
   @@map("squad_gameweek_scores")
+}
+
+/// Audit record of a single transfer (one player out, one player in).
+model SquadTransfer {
+  id          Int      @id @default(autoincrement())
+  squadId     String   @map("squad_id")
+  gameweekId  Int      @map("gameweek_id")
+  playerInId  Int      @map("player_in_id")
+  playerOutId Int      @map("player_out_id")
+  inPrice     Decimal  @map("in_price") @db.Decimal(4, 1)
+  outPrice    Decimal  @map("out_price") @db.Decimal(4, 1)
+  pointsCost  Int      @default(0) @map("points_cost")
+  timestamp   DateTime @default(now())
+
+  // Relations
+  squad     Squad    @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  gameweek  Gameweek @relation(fields: [gameweekId], references: [id])
+  playerIn  Player   @relation("TransferIn", fields: [playerInId], references: [id])
+  playerOut Player   @relation("TransferOut", fields: [playerOutId], references: [id])
+
+  @@index([squadId, gameweekId])
+  @@map("squad_transfers")
 }
 
 /// Records USDC transactions — entry fees, prizes, deposits, withdrawals.

@@ -8,6 +8,7 @@ import {
   getLeagueStandings,
   getH2HStandings,
   cancelLeague,
+  streamLeagueLive,
 } from "../controllers/league.controller.js";
 import { requireAuth } from "../middleware/authMiddleware.js";
 

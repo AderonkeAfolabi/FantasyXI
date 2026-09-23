@@ -14,14 +14,20 @@ import {
   Address,
   Keypair,
   scValToNative,
+  xdr,
 } from "@stellar/stellar-sdk";
-import { getHorizonServer, stellarConfig } from "../../config/stellar.js";
+import {
+  getHorizonServer,
+  getSorobanRpcServer,
+  stellarConfig,
+} from "../../config/stellar.js";
 import { PaymentVerificationResult } from "../../types/index.js";
 import {
   SorobanContractClient,
   OnChainLeagueState,
   InvocationResult,
 } from "./sorobanContractClient.js";
+import { toContractLeagueId } from "./contractLeagueId.js";
 
 export interface VerifyPaymentParams {
   txHash: string;
@@ -42,16 +48,62 @@ export interface ContractReconciliationResult {
   discrepancyUsdc: number;
 }
 
+/** Escrow contract event names emitted as the first topic (symbol_short!). */
+export const ESCROW_EVENT_TOPICS = ["created", "deposit", "settle", "refund"] as const;
+
 export class StellarService {
   private server: Horizon.Server;
   private sorobanClient?: SorobanContractClient;
+  private rpcServer?: rpc.Server;
 
   constructor(
     customServer?: Horizon.Server,
-    customSorobanClient?: SorobanContractClient
+    customSorobanClient?: SorobanContractClient,
+    customRpcServer?: rpc.Server
   ) {
     this.server = customServer || getHorizonServer();
     this.sorobanClient = customSorobanClient;
+    this.rpcServer = customRpcServer;
+  }
+
+  private getRpcServer(): rpc.Server {
+    return this.rpcServer || getSorobanRpcServer();
+  }
+
+  /**
+   * Fetches escrow contract events (created, deposit, settle, refund) from Soroban RPC.
+   * Resumes from `cursor` when given, otherwise starts at `startLedger`.
+   */
+  public async getEscrowContractEvents(params: {
+    cursor?: string;
+    startLedger?: number;
+    limit?: number;
+  }): Promise<rpc.Api.GetEventsResponse> {
+    const filters: rpc.Api.EventFilter[] = [
+      {
+        type: "contract",
+        // Read at call time: stellarConfig is evaluated before dotenv loads in server.ts
+        contractIds: [process.env.STELLAR_ESCROW_CONTRACT_ID || stellarConfig.escrowContractId],
+        topics: ESCROW_EVENT_TOPICS.map((name) => [
+          xdr.ScVal.scvSymbol(name).toXDR("base64"),
+          "*",
+        ]),
+      },
+    ];
+
+    const request: rpc.Api.GetEventsRequest = params.cursor
+      ? { filters, cursor: params.cursor, limit: params.limit }
+      : { filters, startLedger: params.startLedger!, limit: params.limit };
+
+    return this.getRpcServer().getEvents(request);
+  }
+
+  /**
+   * Returns the ledger range currently retained by the Soroban RPC node.
+   */
+  public async getRpcLedgerRange(): Promise<{ oldestLedger: number; latestLedger: number }> {
+    const health = await this.getRpcServer().getHealth();
+    return { oldestLedger: health.oldestLedger, latestLedger: health.latestLedger };
   }
 
   public getSorobanClient(): SorobanContractClient | null {
@@ -222,16 +274,21 @@ export class StellarService {
         }
 
         if (expectedLeagueId !== undefined) {
+          // League UUIDs are mapped to their u64 contract id (compared exactly as bigint)
           const numericExpected =
             typeof expectedLeagueId === "string"
               ? parseInt(expectedLeagueId, 10)
               : expectedLeagueId;
-          const numericInvoked = Number(invocationLeagueId);
+          const expectedContractId =
+            typeof expectedLeagueId === "string" && /^[0-9a-fA-F]{8}-/.test(expectedLeagueId)
+              ? toContractLeagueId(expectedLeagueId)
+              : isNaN(numericExpected)
+                ? null
+                : BigInt(numericExpected);
 
           if (
-            !isNaN(numericExpected) &&
-            !isNaN(numericInvoked) &&
-            numericExpected !== numericInvoked
+            expectedContractId !== null &&
+            expectedContractId !== BigInt(invocationLeagueId)
           ) {
             return {
               success: false,
