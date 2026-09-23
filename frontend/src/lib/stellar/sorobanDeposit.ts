@@ -144,17 +144,25 @@ export async function depositToSorobanEscrow(
   onProgress?.("Building contract invocation...");
   const contract = new Contract(escrowContractId);
 
-  // Convert numeric/string league ID to u64 ScVal
-  const numericLeagueId =
-    typeof leagueId === "string" ? parseInt(leagueId, 10) : leagueId;
-  if (isNaN(numericLeagueId) || numericLeagueId < 0) {
-    throw new Error(`Invalid league ID for escrow: ${leagueId}`);
+  // Convert league ID to u64 ScVal. League UUIDs map to their first 16 hex digits
+  // (must match backend/src/services/financial/contractLeagueId.ts)
+  let contractLeagueId: bigint;
+  const uuidHex = String(leagueId).replace(/-/g, "").slice(0, 16);
+  if (typeof leagueId === "string" && /^[0-9a-fA-F]{8}-/.test(leagueId)) {
+    contractLeagueId = BigInt(`0x${uuidHex}`);
+  } else {
+    const numericLeagueId =
+      typeof leagueId === "string" ? parseInt(leagueId, 10) : leagueId;
+    if (isNaN(numericLeagueId) || numericLeagueId < 0) {
+      throw new Error(`Invalid league ID for escrow: ${leagueId}`);
+    }
+    contractLeagueId = BigInt(numericLeagueId);
   }
 
   const depositOp = contract.call(
     "deposit",
     new Address(userPublicKey).toScVal(),
-    nativeToScVal(BigInt(numericLeagueId), { type: "u64" })
+    nativeToScVal(contractLeagueId, { type: "u64" })
   );
 
   // 3. Build initial transaction

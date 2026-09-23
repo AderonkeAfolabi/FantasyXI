@@ -214,6 +214,73 @@ export interface LeagueStandingsEntry {
   joinedAt: string;
 }
 
+// ============================================================
+// Live Matchday Feed (GET /api/v1/leagues/:id/live, Server-Sent Events)
+// ============================================================
+
+export interface LivePlayerPoints {
+  playerId: number;
+  name: string;
+  teamShortName: string;
+  position: Position;
+  isStarter: boolean;
+  isCaptain: boolean;
+  isViceCaptain: boolean;
+  positionOrder: number;
+  minutesPlayed: number;
+  rawPoints: number;
+  multiplier: number;
+  effectivePoints: number;
+  subbedIn: boolean;
+  subbedOut: boolean;
+}
+
+export interface LiveStandingsEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  squadId: string;
+  squadName: string;
+  membershipStatus: MembershipStatus;
+  totalPoints: number;
+  livePoints: number;
+  lineup: LivePlayerPoints[];
+}
+
+export interface LiveFixture {
+  id: number;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  minutes: number;
+  started: boolean;
+  finished: boolean;
+  kickoffTime: string | null;
+}
+
+export interface LivePlayerEvent {
+  playerId: number;
+  playerName: string;
+  teamShortName: string;
+  goals: number;
+  assists: number;
+  yellowCards: number;
+  redCards: number;
+  saves: number;
+  bonus: number;
+  totalPoints: number;
+}
+
+export interface LiveSnapshot {
+  leagueId: string;
+  gameweek: { id: number; name: string } | null;
+  fixtures: LiveFixture[];
+  events: LivePlayerEvent[];
+  standings: LiveStandingsEntry[];
+  generatedAt: string;
+}
+
 export interface PrizeDistribution {
   participantCount: number;
   entryFee: number;

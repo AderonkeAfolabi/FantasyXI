@@ -64,6 +64,12 @@ export const SQUAD_RULES = {
   MAX_PER_TEAM: 3,
   /** Starting budget in £ millions */
   STARTING_BUDGET: 100.0,
+  /** Free transfers granted each gameweek */
+  FREE_TRANSFERS_PER_GAMEWEEK: 1,
+  /** Maximum free transfers that can be banked */
+  MAX_FREE_TRANSFERS: 5,
+  /** Points deducted per transfer beyond the free allowance */
+  TRANSFER_POINTS_COST: 4,
 } as const;
 
 // ============================================================

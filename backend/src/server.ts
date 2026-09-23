@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import apiV1Router from "./routes/index.js";
+import { EscrowEventIndexer } from "./workers/eventIndexer.js";
 
 dotenv.config();
 
@@ -85,4 +86,14 @@ app.listen(PORT, () => {
   URL:      http://localhost:${PORT}
   Health:   http://localhost:${PORT}/api/health
   `);
+
+  // Soroban escrow event indexer (set EVENT_INDEXER_ENABLED=false to disable)
+  if (
+    process.env.DATABASE_URL &&
+    process.env.STELLAR_ESCROW_CONTRACT_ID &&
+    process.env.EVENT_INDEXER_ENABLED !== "false"
+  ) {
+    const startLedger = Number(process.env.EVENT_INDEXER_START_LEDGER) || undefined;
+    new EscrowEventIndexer({ startLedger }).start();
+  }
 });

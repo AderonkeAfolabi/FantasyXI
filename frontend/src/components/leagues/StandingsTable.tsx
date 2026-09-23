@@ -1,15 +1,21 @@
 "use client";
 
-import React from "react";
+import React, { useLayoutEffect, useRef } from "react";
 import { LeagueStandingsEntry, MembershipStatus } from "@/types";
 import { Badge } from "@/components/ui/Badge";
-import { IconTrophy, IconCheck, IconAlertCircle } from "@/components/ui/Icons";
+import { IconCheck, IconAlertCircle, IconChevronUp, IconChevronDown } from "@/components/ui/Icons";
 
 export interface StandingsTableProps {
   standings: LeagueStandingsEntry[];
   entryFee?: number;
   prizePool?: number;
   currentUserId?: string;
+  /** Live points in the current gameweek by userId (shows the Live GW column) */
+  livePoints?: Record<string, number>;
+  /** Positions moved since the previous live update by userId (positive = up) */
+  rankChanges?: Record<string, number>;
+  /** Makes rows clickable, e.g. to open a manager's live squad */
+  onSelectEntry?: (userId: string) => void;
 }
 
 export const StandingsTable: React.FC<StandingsTableProps> = ({
@@ -17,7 +23,32 @@ export const StandingsTable: React.FC<StandingsTableProps> = ({
   entryFee = 0,
   prizePool = 0,
   currentUserId,
+  livePoints,
+  rankChanges = {},
+  onSelectEntry,
 }) => {
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const lastTops = useRef(new Map<string, number>());
+  const order = standings.map((s) => s.userId).join(",");
+
+  // FLIP animation: slide rows from their previous position when the ranking changes
+  useLayoutEffect(() => {
+    const nextTops = new Map<string, number>();
+    rowRefs.current.forEach((row, userId) => {
+      // offsetTop is relative to the table, so page scrolling does not trigger animations
+      const top = row.offsetTop;
+      nextTops.set(userId, top);
+      const previousTop = lastTops.current.get(userId);
+      if (previousTop !== undefined && previousTop !== top) {
+        row.animate(
+          [{ transform: `translateY(${previousTop - top}px)` }, { transform: "translateY(0)" }],
+          { duration: 600, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
+        );
+      }
+    });
+    lastTops.current = nextTops;
+  }, [order]);
+
   if (standings.length === 0) {
     return (
       <div className="py-12 text-center text-slate-500 text-xs">
@@ -77,6 +108,7 @@ export const StandingsTable: React.FC<StandingsTableProps> = ({
             <th className="py-3 px-3">Manager & Squad</th>
             <th className="py-3 px-3">Escrow Status</th>
             <th className="py-3 px-3 text-center">Best GW</th>
+            {livePoints && <th className="py-3 px-3 text-right">Live GW</th>}
             <th className="py-3 px-3 text-right">Total Pts</th>
             {prizePool > 0 && <th className="py-3 px-3 text-right">Projected USDC</th>}
           </tr>
@@ -85,11 +117,23 @@ export const StandingsTable: React.FC<StandingsTableProps> = ({
           {standings.map((entry) => {
             const isMe = currentUserId && entry.userId === currentUserId;
             const prize = getProjectedPrize(entry.rank);
+            const change = rankChanges[entry.userId] ?? 0;
 
             return (
               <tr
                 key={entry.userId}
-                className={`transition-colors ${
+                ref={(row) => {
+                  if (row) rowRefs.current.set(entry.userId, row);
+                  else rowRefs.current.delete(entry.userId);
+                }}
+                onClick={onSelectEntry ? () => onSelectEntry(entry.userId) : undefined}
+                onKeyDown={
+                  onSelectEntry
+                    ? (e) => e.key === "Enter" && onSelectEntry(entry.userId)
+                    : undefined
+                }
+                tabIndex={onSelectEntry ? 0 : undefined}
+                className={`transition-colors ${onSelectEntry ? "cursor-pointer" : ""} ${
                   isMe
                     ? "bg-emerald-500/10 hover:bg-emerald-500/15"
                     : "hover:bg-slate-900/40"
@@ -97,7 +141,24 @@ export const StandingsTable: React.FC<StandingsTableProps> = ({
               >
                 {/* Rank */}
                 <td className="py-3 px-3 text-center">
-                  <div className="flex justify-center">{getRankBadge(entry.rank)}</div>
+                  <div className="flex items-center justify-center gap-1">
+                    {getRankBadge(entry.rank)}
+                    {change !== 0 && (
+                      <span
+                        className={`flex items-center text-[10px] font-bold font-mono ${
+                          change > 0 ? "text-emerald-400" : "text-rose-400"
+                        }`}
+                        title={`${change > 0 ? "Up" : "Down"} ${Math.abs(change)}`}
+                      >
+                        {change > 0 ? (
+                          <IconChevronUp className="w-3 h-3" />
+                        ) : (
+                          <IconChevronDown className="w-3 h-3" />
+                        )}
+                        {Math.abs(change)}
+                      </span>
+                    )}
+                  </div>
                 </td>
 
                 {/* Manager & Squad */}
@@ -138,6 +199,13 @@ export const StandingsTable: React.FC<StandingsTableProps> = ({
                 <td className="py-3 px-3 text-center font-mono text-slate-300">
                   {entry.bestGameweekPoints ?? "—"} pts
                 </td>
+
+                {/* Live Gameweek Points */}
+                {livePoints && (
+                  <td className="py-3 px-3 text-right font-mono font-bold text-emerald-400 tabular-nums">
+                    {livePoints[entry.userId] ?? 0}
+                  </td>
+                )}
 
                 {/* Total Points */}
                 <td className="py-3 px-3 text-right">

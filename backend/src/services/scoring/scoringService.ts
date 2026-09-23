@@ -8,6 +8,7 @@ import { Position, SQUAD_RULES } from "../../types/index.js";
  * - Starting XI points calculation from PlayerGameweekStats
  * - Captain 2x multiplier (with vice-captain fallback when captain played 0 mins)
  * - Automatic bench substitutions preserving valid formations
+ * - Transfer point hits (-4 per transfer beyond the free allowance)
  * - SquadGameweekScore persistence and total points aggregation
  *
  * Laravel equivalent: Like app/Services/ScoringService.php with event listeners
@@ -35,6 +36,7 @@ export interface GameweekCalculationResult {
   startingPoints: number;
   benchPoints: number;
   captainPoints: number;
+  transferCost: number;
   totalPoints: number;
   lineupDetails: PlayerScoreDetail[];
 }
@@ -53,11 +55,13 @@ export class ScoringService {
       isViceCaptain: boolean;
       positionOrder: number; // 1 to 15 (1-11 starters, 12 bench GKP, 13-15 bench outfield)
     }>,
-    statsMap: Map<number, { minutes: number; totalPoints: number }>
+    statsMap: Map<number, { minutes: number; totalPoints: number }>,
+    transferCost: number = 0
   ): {
     startingPoints: number;
     benchPoints: number;
     captainPoints: number;
+    transferCost: number;
     totalPoints: number;
     details: PlayerScoreDetail[];
   } {
@@ -196,7 +200,8 @@ export class ScoringService {
       startingPoints,
       benchPoints,
       captainPoints: captainBonusPoints,
-      totalPoints: startingPoints,
+      transferCost,
+      totalPoints: startingPoints - transferCost,
       details: allDetails,
     };
   }
@@ -248,7 +253,18 @@ export class ScoringService {
       positionOrder: sp.positionOrder,
     }));
 
-    const result = ScoringService.calculateLineupScore(formattedPlayers, statsMap);
+    // Points hits from this gameweek's transfers
+    const transfers = await prisma.squadTransfer.aggregate({
+      where: { squadId, gameweekId },
+      _sum: { pointsCost: true },
+    });
+    const transferCost = transfers._sum.pointsCost ?? 0;
+
+    const result = ScoringService.calculateLineupScore(
+      formattedPlayers,
+      statsMap,
+      transferCost
+    );
 
     // Persist into SquadGameweekScore
     await prisma.squadGameweekScore.upsert({
@@ -262,6 +278,7 @@ export class ScoringService {
         points: result.totalPoints,
         benchPoints: result.benchPoints,
         captainPoints: result.captainPoints,
+        transferCost: result.transferCost,
         calculatedAt: new Date(),
       },
       create: {
@@ -270,6 +287,7 @@ export class ScoringService {
         points: result.totalPoints,
         benchPoints: result.benchPoints,
         captainPoints: result.captainPoints,
+        transferCost: result.transferCost,
       },
     });
 
@@ -291,6 +309,7 @@ export class ScoringService {
       startingPoints: result.startingPoints,
       benchPoints: result.benchPoints,
       captainPoints: result.captainPoints,
+      transferCost: result.transferCost,
       totalPoints: result.totalPoints,
       lineupDetails: result.details,
     };

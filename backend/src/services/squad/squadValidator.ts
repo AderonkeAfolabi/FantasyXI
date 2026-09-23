@@ -61,7 +61,8 @@ export class SquadValidator {
    */
   public static validateSquad(
     selections: SquadPlayerSelection[],
-    players: PlayerForValidation[]
+    players: PlayerForValidation[],
+    maxBudget: number = SQUAD_RULES.STARTING_BUDGET
   ): ValidatedSquadResult {
     const errors: string[] = [];
 
@@ -181,10 +182,10 @@ export class SquadValidator {
       );
     }
 
-    // 6. Budget validation (£100.0m maximum)
-    if (totalCost > SQUAD_RULES.STARTING_BUDGET) {
+    // 6. Budget validation (£100.0m maximum, or available funds for transfers)
+    if (totalCost > maxBudget) {
       errors.push(
-        `Squad budget exceeded: Total cost is £${totalCost.toFixed(1)}m (max allowed is £${SQUAD_RULES.STARTING_BUDGET.toFixed(1)}m)`
+        `Squad budget exceeded: Total cost is £${totalCost.toFixed(1)}m (max allowed is £${maxBudget.toFixed(1)}m)`
       );
     }
 

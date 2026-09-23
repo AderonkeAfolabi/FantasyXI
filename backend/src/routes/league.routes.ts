@@ -7,6 +7,7 @@ import {
   getLeagueMembers,
   getLeagueStandings,
   cancelLeague,
+  streamLeagueLive,
 } from "../controllers/league.controller.js";
 import { requireAuth } from "../middleware/authMiddleware.js";
 
@@ -29,6 +30,9 @@ router.get("/:id/members", getLeagueMembers);
 
 // GET /api/v1/leagues/:id/standings (Public: view league standings)
 router.get("/:id/standings", getLeagueStandings);
+
+// GET /api/v1/leagues/:id/live (Public: SSE live matchday feed)
+router.get("/:id/live", streamLeagueLive);
 
 // POST /api/v1/leagues/:id/cancel (Protected: creator only)
 router.post("/:id/cancel", requireAuth, cancelLeague);
