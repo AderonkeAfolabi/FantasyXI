@@ -62,17 +62,16 @@ export const Pitch: React.FC<PitchProps> = ({
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-48 sm:w-64 h-24 sm:h-28 border-t-2 border-x-2 border-white/30 rounded-t-lg" />
         </div>
 
-        {/* Formation Header Pill */}
-        <div className="relative z-10 flex items-center justify-between px-2 mb-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-950/80 border border-slate-800 text-xs font-bold font-mono text-emerald-400 backdrop-blur-sm shadow-md">
-            <span>FORMATION</span>
-            <span className="text-white bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
-              {currentFormation}
-            </span>
+        {/* Pitch Status Header */}
+        <div className="relative z-10 flex items-center justify-between px-3 py-1.5 mb-2 border-b border-white/10 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 uppercase tracking-wider text-[11px]">Formation</span>
+            <span className="text-emerald-400 font-bold">{currentFormation}</span>
           </div>
 
-          <div className="text-[11px] font-mono text-slate-300 bg-slate-950/70 px-2.5 py-1 rounded-full border border-slate-800/80">
-            {starters.filter((s) => !!s.player).length} / 11 Starters
+          <div className="text-[11px] text-slate-300 tracking-wide">
+            <span className="text-white font-semibold">{starters.filter((s) => !!s.player).length}</span>
+            <span className="text-slate-400"> / 11 Starters</span>
           </div>
         </div>
 

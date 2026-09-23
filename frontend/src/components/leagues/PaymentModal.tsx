@@ -352,11 +352,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     {requirement?.entryFee ?? entryFee} USDC
                   </div>
                 </div>
-                <div className="text-right text-[11px] text-slate-400 space-y-0.5">
-                  <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-semibold text-[10px] border border-emerald-500/20">
+                <div className="text-right text-[11px] space-y-0.5">
+                  <div className="text-emerald-400 font-mono font-semibold text-[11px] tracking-wider uppercase">
                     Stellar Testnet
-                  </span>
-                  <div className="font-mono text-xs text-slate-300">Soroban Contract</div>
+                  </div>
+                  <div className="font-mono text-xs text-slate-400">Soroban Contract</div>
                 </div>
               </div>
 

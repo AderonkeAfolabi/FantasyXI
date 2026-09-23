@@ -41,7 +41,7 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
             : "bg-slate-950/40 border border-dashed border-slate-700 hover:border-emerald-400 hover:bg-slate-900/60"
         }`}
       >
-        <div className="w-10 h-10 rounded-full bg-slate-800/80 group-hover:bg-emerald-500/20 text-slate-400 group-hover:text-emerald-400 flex items-center justify-center mb-1.5 transition-colors">
+        <div className="w-10 h-10 rounded-lg bg-slate-800/80 group-hover:bg-emerald-500/20 text-slate-400 group-hover:text-emerald-400 flex items-center justify-center mb-1.5 transition-colors">
           <span className="text-lg font-bold">+</span>
         </div>
         <PositionBadge position={positionSlot} size="sm" />

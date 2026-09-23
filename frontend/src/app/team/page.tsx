@@ -18,6 +18,7 @@ import {
   IconPlus,
 } from "@/components/ui/Icons";
 import { Button } from "@/components/ui/Button";
+import { PositionBadge } from "@/components/ui/Badge";
 
 interface LocalSquadPlayer {
   id?: number | string;
@@ -464,13 +465,11 @@ export default function TeamPage() {
         </div>
 
         {/* Formation & Rules status */}
-        <div className="flex items-center gap-2">
-          <div className="px-3 py-1.5 rounded-lg bg-slate-950/70 border border-slate-800 text-xs font-mono text-slate-300">
-            FORMATION:{" "}
-            <span className="text-emerald-400 font-bold">
-              {detectFormation(starters as any)}
-            </span>
-          </div>
+        <div className="flex items-center gap-2 text-xs font-mono">
+          <span className="text-slate-400 uppercase tracking-wider text-[11px]">Formation</span>
+          <span className="text-emerald-400 font-bold text-sm">
+            {detectFormation(starters as any)}
+          </span>
         </div>
       </div>
 
@@ -523,9 +522,7 @@ export default function TeamPage() {
       {selectedPlayer && (
         <div className="p-3.5 rounded-xl bg-slate-900 border border-emerald-500/50 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-bold flex items-center justify-center text-xs">
-              {selectedPlayer.player.position}
-            </div>
+            <PositionBadge position={selectedPlayer.player.position} size="md" />
             <div>
               <div className="text-xs font-bold text-white">
                 {selectedPlayer.player.displayName} ({selectedPlayer.player.team?.shortName || "PL"})

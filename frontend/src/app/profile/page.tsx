@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { Squad, League } from "@/types";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import {
   IconUser,
@@ -183,10 +182,10 @@ export default function ProfilePage() {
 
           <div className="py-3 flex items-center justify-between">
             <span className="text-slate-400 font-medium">Authentication Session</span>
-            <Badge variant="success" className="gap-1">
-              <IconCheck className="w-3 h-3" />
-              <span>JWT Access Active</span>
-            </Badge>
+            <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
+              <IconCheck className="w-3.5 h-3.5" />
+              <span>Active</span>
+            </div>
           </div>
 
           <div className="py-3 flex items-center justify-between">

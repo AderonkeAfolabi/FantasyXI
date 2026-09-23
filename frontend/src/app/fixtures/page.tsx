@@ -217,7 +217,7 @@ export default function FixturesPage() {
                       <div className="px-4 text-center">
                         {fix.started ? (
                           <div className="flex flex-col items-center">
-                            <span className="font-mono font-black text-sm text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40">
+                            <span className="font-mono font-black text-base text-emerald-400 tabular-nums tracking-wider">
                               {fix.homeScore ?? 0} - {fix.awayScore ?? 0}
                             </span>
                             <span className="text-[10px] text-slate-500 font-mono mt-1 font-semibold uppercase">

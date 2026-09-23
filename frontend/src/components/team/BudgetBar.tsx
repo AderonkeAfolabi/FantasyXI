@@ -128,7 +128,7 @@ export const BudgetBar: React.FC<BudgetBarProps> = ({
       </div>
 
       {/* Visual Budget Progress Bar */}
-      <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+      <div className="w-full bg-slate-900 rounded-sm h-2 overflow-hidden border border-slate-800">
         <div
           className={`h-full transition-all duration-300 ${
             isOverBudget

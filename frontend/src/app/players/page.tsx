@@ -218,10 +218,8 @@ export default function PlayersPage() {
                     </td>
 
                     {/* Club */}
-                    <td className="py-3 px-3">
-                      <span className="font-mono text-slate-300 font-bold px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800">
-                        {p.team?.shortName || `Team ${p.teamId}`}
-                      </span>
+                    <td className="py-3 px-3 font-mono font-medium text-slate-300">
+                      {p.team?.shortName || `Team ${p.teamId}`}
                     </td>
 
                     {/* Price */}

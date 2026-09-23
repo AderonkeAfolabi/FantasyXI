@@ -70,7 +70,7 @@ export const Sidebar: React.FC = () => {
                 <Icon size={18} className={active ? "text-emerald-400" : "text-slate-400"} />
                 <span>{item.label}</span>
                 {item.href === "/leagues" && (
-                  <span className="ml-auto text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <span className="ml-auto text-[10px] uppercase font-mono font-bold text-amber-400/90 tracking-wider">
                     USDC
                   </span>
                 )}

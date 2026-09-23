@@ -91,8 +91,8 @@ export default function HomePage() {
         <div className="relative rounded-2xl bg-gradient-to-br from-pitch-surface via-slate-900 to-pitch-surface border border-pitch-border p-6 sm:p-10 overflow-hidden shadow-2xl">
           <div className="absolute -right-12 -bottom-12 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
           <div className="relative z-10 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-4">
-              <IconShield className="w-3.5 h-3.5" />
+            <div className="flex items-center gap-2 text-emerald-400 text-xs font-mono font-bold uppercase tracking-wider mb-3">
+              <IconShield className="w-3.5 h-3.5 text-emerald-400" />
               <span>Stellar Testnet &bull; Smart Escrow Active</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-black text-white uppercase tracking-tight leading-tight">
@@ -260,7 +260,7 @@ export default function HomePage() {
                 {/* Captaincy Bar */}
                 <div className="grid grid-cols-2 gap-4 p-3.5 rounded-lg bg-slate-950/60 border border-slate-800 mb-5">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-black text-xs font-mono">
+                    <div className="w-8 h-8 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-black text-xs font-mono">
                       C
                     </div>
                     <div>
@@ -274,7 +274,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-slate-700/40 border border-slate-600 text-slate-300 flex items-center justify-center font-black text-xs font-mono">
+                    <div className="w-8 h-8 rounded-md bg-slate-700/40 border border-slate-600 text-slate-300 flex items-center justify-center font-black text-xs font-mono">
                       V
                     </div>
                     <div>
@@ -460,7 +460,7 @@ export default function HomePage() {
                         {/* Score or Time */}
                         <div className="px-3 text-center">
                           {fix.started ? (
-                            <span className="font-mono font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/40">
+                            <span className="font-mono font-bold text-emerald-400 text-sm tracking-widest tabular-nums">
                               {fix.homeScore ?? 0} - {fix.awayScore ?? 0}
                             </span>
                           ) : (
