@@ -28,6 +28,27 @@ import {
   ReconciliationReport,
 } from "../../types/index.js";
 
+/** Max participants per refund invocation, keeps Soroban footprint and fees in bounds. */
+export const REFUND_BATCH_SIZE = 10;
+
+export interface RefundDispatchReport {
+  leagueId: string;
+  contractLeagueId: string;
+  batches: number;
+  refundedMemberIds: string[];
+  failedBatches: Array<{ memberIds: string[]; error: string }>;
+  /** Paid members without a linked Stellar address — need manual follow-up */
+  skippedMemberIds: string[];
+}
+
+export interface RefundReconciliationReport {
+  leagueId: string;
+  contractLeagueId: string;
+  remainingEscrowStroops: string;
+  outstandingMemberIds: string[];
+  isFullyRefunded: boolean;
+}
+
 export class FinancialValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -234,8 +255,8 @@ export class FinancialService {
     }
 
     // Check if txHash has already been registered
-    const existingTx = await this.db.transaction.findUnique({
-      where: { stellarTxHash },
+    const existingTx = await this.db.transaction.findFirst({
+      where: { stellarTxHash, type: TransactionType.ENTRY_FEE },
     });
 
     if (existingTx && existingTx.memberId && existingTx.memberId !== member.id) {
@@ -507,6 +528,164 @@ export class FinancialService {
       netPrizePool: distribution.prizePool,
       winners,
       canSettle: true,
+    };
+  }
+
+  /**
+   * Maps a league UUID to the u64 `league_id` used by the escrow contract
+   * (first 16 hex digits of the UUID).
+   */
+  public static toContractLeagueId(leagueId: string): bigint {
+    const hex = leagueId.replace(/-/g, "").slice(0, 16);
+    if (!/^[0-9a-fA-F]{16}$/.test(hex)) {
+      throw new FinancialValidationError(`League ID ${leagueId} is not a valid UUID`);
+    }
+    return BigInt(`0x${hex}`);
+  }
+
+  /**
+   * Splits items into consecutive batches of at most `size`.
+   */
+  public static chunk<T>(items: T[], size: number): T[][] {
+    const batches: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+      batches.push(items.slice(i, i + size));
+    }
+    return batches;
+  }
+
+  /**
+   * Refunds all paid participants of a cancelled league in batches of REFUND_BATCH_SIZE.
+   * Each successful batch atomically marks its members REFUNDED and records REFUND
+   * transactions with the batch's Stellar hash. Failed batches stay pending, so the
+   * dispatcher can safely be re-run (the contract ignores already-refunded deposits).
+   */
+  public async processLeagueRefunds(leagueId: string): Promise<RefundDispatchReport> {
+    const league = await this.db.league.findUnique({
+      where: { id: leagueId },
+      include: { members: true },
+    });
+
+    if (!league) {
+      throw new FinancialNotFoundError(`League ${leagueId} not found`);
+    }
+    if (league.status !== LeagueStatus.CANCELLED) {
+      throw new FinancialValidationError(
+        `Refunds can only be processed for CANCELLED leagues (current: ${league.status})`
+      );
+    }
+
+    const pending = league.members.filter(
+      (m: any) =>
+        m.paymentStatus === PaymentStatus.REFUND_PENDING ||
+        m.paymentStatus === PaymentStatus.PAYMENT_CONFIRMED
+    );
+    const refundable = pending.filter((m: any) => m.stellarAddress);
+    const contractLeagueId = FinancialService.toContractLeagueId(league.id);
+    const batches = FinancialService.chunk(refundable, REFUND_BATCH_SIZE);
+
+    const report: RefundDispatchReport = {
+      leagueId: league.id,
+      contractLeagueId: contractLeagueId.toString(),
+      batches: batches.length,
+      refundedMemberIds: [],
+      failedBatches: [],
+      skippedMemberIds: pending
+        .filter((m: any) => !m.stellarAddress)
+        .map((m: any) => m.id),
+    };
+
+    for (const batch of batches) {
+      const memberIds = batch.map((m: any) => m.id);
+      let result;
+      try {
+        result = await this.stellar.refundParticipants(
+          contractLeagueId,
+          batch.map((m: any) => m.stellarAddress)
+        );
+      } catch (error) {
+        result = { success: false, error: (error as Error).message };
+      }
+
+      if (!result.success) {
+        report.failedBatches.push({
+          memberIds,
+          error: result.error || "Refund invocation failed",
+        });
+        continue;
+      }
+
+      const confirmedAt = new Date();
+      await this.db.$transaction([
+        ...batch.map((m: any) =>
+          this.db.leagueMember.update({
+            where: { id: m.id },
+            data: { paymentStatus: PaymentStatus.REFUNDED },
+          })
+        ),
+        ...batch.map((m: any) =>
+          this.db.transaction.create({
+            data: {
+              userId: m.userId,
+              leagueId: league.id,
+              memberId: m.id,
+              type: TransactionType.REFUND,
+              status: TransactionStatus.CONFIRMED,
+              amount: league.entryFee,
+              asset: stellarConfig.usdcAssetCode,
+              assetIssuer: stellarConfig.usdcIssuer,
+              stellarTxHash: result.txHash ?? null,
+              confirmedAt,
+            },
+          })
+        ),
+      ]);
+      report.refundedMemberIds.push(...memberIds);
+    }
+
+    return report;
+  }
+
+  /**
+   * Confirms that the escrow contract holds no remaining deposits for a refunded league.
+   */
+  public async verifyRefundReconciliation(
+    leagueId: string
+  ): Promise<RefundReconciliationReport> {
+    const league = await this.db.league.findUnique({
+      where: { id: leagueId },
+      include: { members: true },
+    });
+
+    if (!league) {
+      throw new FinancialNotFoundError(`League ${leagueId} not found`);
+    }
+
+    const contractLeagueId = FinancialService.toContractLeagueId(league.id);
+    let remaining = 0n;
+    for (const m of league.members) {
+      if (m.stellarAddress) {
+        remaining += await this.stellar.getContractDeposit(
+          contractLeagueId,
+          m.stellarAddress
+        );
+      }
+    }
+
+    const outstandingMemberIds = league.members
+      .filter(
+        (m: any) =>
+          m.paymentStatus === PaymentStatus.REFUND_PENDING ||
+          m.paymentStatus === PaymentStatus.PAYMENT_CONFIRMED
+      )
+      .map((m: any) => m.id);
+
+    return {
+      leagueId: league.id,
+      contractLeagueId: contractLeagueId.toString(),
+      remainingEscrowStroops: remaining.toString(),
+      outstandingMemberIds,
+      isFullyRefunded: remaining === 0n && outstandingMemberIds.length === 0,
     };
   }
 

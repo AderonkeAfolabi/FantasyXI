@@ -202,6 +202,38 @@ export async function getLeagueStandings(
   }
 }
 
+export async function getH2HStandings(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const standings = await leagueService.getH2HStandings(id as string);
+
+    res.json({
+      success: true,
+      data: standings,
+    });
+  } catch (error) {
+    if (error instanceof LeagueNotFoundError) {
+      res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    if (error instanceof LeagueValidationError) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+}
+
 export async function cancelLeague(
   req: Request,
   res: Response,

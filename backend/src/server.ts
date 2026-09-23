@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import apiV1Router from "./routes/index.js";
-import { EscrowEventIndexer } from "./workers/eventIndexer.js";
+import { startJobQueue, stopJobQueue, getQueueHealth } from "./queues/jobQueue.js";
 
 dotenv.config();
 
@@ -38,6 +38,19 @@ app.get("/api/health", (_req: Request, res: Response) => {
     message: "FantasyXI API is running",
     timestamp: new Date().toISOString(),
   });
+});
+
+app.get("/api/health/queues", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const health = await getQueueHealth();
+    res.status(health.running ? 200 : 503).json({
+      success: health.running,
+      data: health,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // API v1 Routes
@@ -87,13 +100,14 @@ app.listen(PORT, () => {
   Health:   http://localhost:${PORT}/api/health
   `);
 
-  // Soroban escrow event indexer (set EVENT_INDEXER_ENABLED=false to disable)
-  if (
-    process.env.DATABASE_URL &&
-    process.env.STELLAR_ESCROW_CONTRACT_ID &&
-    process.env.EVENT_INDEXER_ENABLED !== "false"
-  ) {
-    const startLedger = Number(process.env.EVENT_INDEXER_START_LEDGER) || undefined;
-    new EscrowEventIndexer({ startLedger }).start();
+  // Background jobs (set JOB_QUEUE_ENABLED=false to run the API without workers)
+  if (process.env.DATABASE_URL && process.env.JOB_QUEUE_ENABLED !== "false") {
+    startJobQueue(process.env.DATABASE_URL).catch((error) =>
+      console.error("[jobs] Failed to start job queue:", error)
+    );
   }
+});
+
+process.on("SIGTERM", () => {
+  stopJobQueue().finally(() => process.exit(0));
 });

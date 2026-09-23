@@ -1,5 +1,5 @@
 import { prisma } from "../../config/db.js";
-import { Position, SQUAD_RULES } from "../../types/index.js";
+import { ChipType, Position, SQUAD_RULES } from "../../types/index.js";
 
 /**
  * Scoring and Fantasy Points Calculation Service.
@@ -8,7 +8,9 @@ import { Position, SQUAD_RULES } from "../../types/index.js";
  * - Starting XI points calculation from PlayerGameweekStats
  * - Captain 2x multiplier (with vice-captain fallback when captain played 0 mins)
  * - Automatic bench substitutions preserving valid formations
- * - Transfer point hits (-4 per transfer beyond the free allowance)
+ * - Chips: Triple Captain (3x), Bench Boost (bench counts, no auto-subs),
+ *   Wildcard / Free Hit (transfer point deductions waived)
+ * - Head-to-head match resolution (Win 3 / Draw 1 / Loss 0)
  * - SquadGameweekScore persistence and total points aggregation
  *
  * Laravel equivalent: Like app/Services/ScoringService.php with event listeners
@@ -24,10 +26,16 @@ export interface PlayerScoreDetail {
   positionOrder: number;
   minutesPlayed: number;
   rawPoints: number;
-  multiplier: number; // 1, 2 for active captain
+  multiplier: number; // 1, 2 for active captain, 3 with Triple Captain
   effectivePoints: number; // rawPoints * multiplier
   subbedIn: boolean;
   subbedOut: boolean;
+}
+
+export interface LineupScoreOptions {
+  chip?: ChipType | null;
+  /** Transfer point deduction for the gameweek (e.g. 4 per extra transfer) */
+  transferCost?: number;
 }
 
 export interface GameweekCalculationResult {
@@ -37,6 +45,7 @@ export interface GameweekCalculationResult {
   benchPoints: number;
   captainPoints: number;
   transferCost: number;
+  chip: ChipType | null;
   totalPoints: number;
   lineupDetails: PlayerScoreDetail[];
 }
@@ -56,7 +65,7 @@ export class ScoringService {
       positionOrder: number; // 1 to 15 (1-11 starters, 12 bench GKP, 13-15 bench outfield)
     }>,
     statsMap: Map<number, { minutes: number; totalPoints: number }>,
-    transferCost: number = 0
+    options: LineupScoreOptions = {}
   ): {
     startingPoints: number;
     benchPoints: number;
@@ -65,6 +74,9 @@ export class ScoringService {
     totalPoints: number;
     details: PlayerScoreDetail[];
   } {
+    const chip = options.chip ?? null;
+    const isBenchBoost = chip === ChipType.BENCH_BOOST;
+
     // 1. Separate starters and bench
     const starterDetails: PlayerScoreDetail[] = [];
     const benchDetails: PlayerScoreDetail[] = [];
@@ -97,10 +109,11 @@ export class ScoringService {
     benchDetails.sort((a, b) => a.positionOrder - b.positionOrder);
 
     // 2. Perform auto-substitutions for starters who played 0 minutes
+    // (skipped with Bench Boost, where every bench player already scores)
     // Current formation counts in starting XI
     const currentStarters = [...starterDetails];
 
-    for (let i = 0; i < currentStarters.length; i++) {
+    for (let i = 0; i < currentStarters.length && !isBenchBoost; i++) {
       const starter = currentStarters[i];
       if (starter.minutesPlayed > 0) {
         continue;
@@ -150,7 +163,7 @@ export class ScoringService {
       }
     }
 
-    // 3. Determine Captain multiplier (2x)
+    // 3. Determine Captain multiplier (2x, or 3x with Triple Captain)
     // Find designated captain and vice-captain
     const designatedCaptain = starterDetails.find((s) => s.isCaptain);
     const designatedVice = starterDetails.find((s) => s.isViceCaptain);
@@ -167,9 +180,10 @@ export class ScoringService {
       activeCaptain = designatedCaptain;
     }
 
+    const captainMultiplier = chip === ChipType.TRIPLE_CAPTAIN ? 3 : 2;
     if (activeCaptain) {
-      activeCaptain.multiplier = 2;
-      activeCaptain.effectivePoints = activeCaptain.rawPoints * 2;
+      activeCaptain.multiplier = captainMultiplier;
+      activeCaptain.effectivePoints = activeCaptain.rawPoints * captainMultiplier;
     }
 
     // 4. Sum up points
@@ -179,8 +193,9 @@ export class ScoringService {
 
     for (const player of currentStarters) {
       startingPoints += player.effectivePoints;
-      if (player.multiplier === 2) {
-        captainBonusPoints = player.rawPoints; // The extra points from captaincy
+      if (player.multiplier > 1) {
+        // The extra points from captaincy
+        captainBonusPoints = player.rawPoints * (player.multiplier - 1);
       }
     }
 
@@ -196,14 +211,33 @@ export class ScoringService {
       (a, b) => a.positionOrder - b.positionOrder
     );
 
+    // Wildcard and Free Hit waive transfer point deductions
+    const transferCost =
+      chip === ChipType.WILDCARD || chip === ChipType.FREE_HIT
+        ? 0
+        : options.transferCost ?? 0;
+
     return {
       startingPoints,
       benchPoints,
       captainPoints: captainBonusPoints,
       transferCost,
-      totalPoints: startingPoints - transferCost,
+      totalPoints:
+        startingPoints + (isBenchBoost ? benchPoints : 0) - transferCost,
       details: allDetails,
     };
+  }
+
+  /**
+   * Resolves a head-to-head match: Win = 3 pts, Draw = 1 pt, Loss = 0 pts.
+   */
+  public static resolveHeadToHead(
+    homeScore: number,
+    awayScore: number
+  ): { homePoints: number; awayPoints: number } {
+    if (homeScore > awayScore) return { homePoints: 3, awayPoints: 0 };
+    if (homeScore < awayScore) return { homePoints: 0, awayPoints: 3 };
+    return { homePoints: 1, awayPoints: 1 };
   }
 
   /**
@@ -253,18 +287,20 @@ export class ScoringService {
       positionOrder: sp.positionOrder,
     }));
 
-    // Points hits from this gameweek's transfers
-    const transfers = await prisma.squadTransfer.aggregate({
-      where: { squadId, gameweekId },
-      _sum: { pointsCost: true },
-    });
-    const transferCost = transfers._sum.pointsCost ?? 0;
+    const [chipUsage, existingScore] = await Promise.all([
+      prisma.squadChipUsage.findUnique({
+        where: { squadId_gameweekId: { squadId, gameweekId } },
+      }),
+      prisma.squadGameweekScore.findUnique({
+        where: { squadId_gameweekId: { squadId, gameweekId } },
+      }),
+    ]);
+    const chip = chipUsage?.chipType ?? null;
 
-    const result = ScoringService.calculateLineupScore(
-      formattedPlayers,
-      statsMap,
-      transferCost
-    );
+    const result = ScoringService.calculateLineupScore(formattedPlayers, statsMap, {
+      chip,
+      transferCost: existingScore?.transferCost ?? 0,
+    });
 
     // Persist into SquadGameweekScore
     await prisma.squadGameweekScore.upsert({
@@ -310,6 +346,7 @@ export class ScoringService {
       benchPoints: result.benchPoints,
       captainPoints: result.captainPoints,
       transferCost: result.transferCost,
+      chip,
       totalPoints: result.totalPoints,
       lineupDetails: result.details,
     };
