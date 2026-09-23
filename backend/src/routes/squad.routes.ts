@@ -6,6 +6,7 @@ import {
   getMySquads,
   getUserSquads,
   calculateGameweekScore,
+  activateChip,
 } from "../controllers/squad.controller.js";
 import { requireAuth } from "../middleware/authMiddleware.js";
 
@@ -22,6 +23,9 @@ router.get("/:id", getSquadById);
 
 // PUT /api/v1/squads/:id (Protected: update user's own squad)
 router.put("/:id", requireAuth, updateSquad);
+
+// POST /api/v1/squads/:id/chip (Protected: play a chip before the gameweek deadline)
+router.post("/:id/chip", requireAuth, activateChip);
 
 // GET /api/v1/squads/user/:userId (Public: view squads by user ID)
 router.get("/user/:userId", getUserSquads);

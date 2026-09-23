@@ -20,6 +20,7 @@ import {
   ScoringType,
   TransactionType,
   TransactionStatus,
+  ChipType,
 } from "@prisma/client";
 
 export {
@@ -30,6 +31,7 @@ export {
   ScoringType,
   TransactionType,
   TransactionStatus,
+  ChipType,
 };
 
 
@@ -205,6 +207,7 @@ export interface CreateLeagueInput {
   startGameweekId: number;
   endGameweekId: number;
   squadId: string; // Creator's initial squad
+  scoringType?: ScoringType; // default CLASSIC
 }
 
 export interface JoinLeagueInput {
@@ -226,6 +229,21 @@ export interface LeagueStandingsEntry {
     points: number;
   }>;
   joinedAt: Date;
+}
+
+export interface H2HStandingsEntry {
+  rank: number;
+  memberId: string;
+  userId: string;
+  username: string;
+  squadName: string;
+  matchesWon: number;
+  matchesDrawn: number;
+  matchesLost: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  pointsDifference: number;
+  h2hPoints: number;
 }
 
 export interface PrizeDistribution {

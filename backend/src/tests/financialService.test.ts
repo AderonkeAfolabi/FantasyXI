@@ -108,6 +108,12 @@ function createMockDb(overrides?: any) {
       },
     },
     transaction: {
+      findFirst: async ({ where }: any) =>
+        Array.from(state.transactions.values()).find(
+          (tx: any) =>
+            tx.stellarTxHash === where.stellarTxHash &&
+            (!where.type || !tx.type || tx.type === where.type)
+        ) || null,
       findUnique: async ({ where }: any) => {
         if (where.stellarTxHash) {
           return (

@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import apiV1Router from "./routes/index.js";
+import { startJobQueue, stopJobQueue, getQueueHealth } from "./queues/jobQueue.js";
 
 dotenv.config();
 
@@ -37,6 +38,19 @@ app.get("/api/health", (_req: Request, res: Response) => {
     message: "FantasyXI API is running",
     timestamp: new Date().toISOString(),
   });
+});
+
+app.get("/api/health/queues", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const health = await getQueueHealth();
+    res.status(health.running ? 200 : 503).json({
+      success: health.running,
+      data: health,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // API v1 Routes
@@ -85,4 +99,15 @@ app.listen(PORT, () => {
   URL:      http://localhost:${PORT}
   Health:   http://localhost:${PORT}/api/health
   `);
+
+  // Background jobs (set JOB_QUEUE_ENABLED=false to run the API without workers)
+  if (process.env.DATABASE_URL && process.env.JOB_QUEUE_ENABLED !== "false") {
+    startJobQueue(process.env.DATABASE_URL).catch((error) =>
+      console.error("[jobs] Failed to start job queue:", error)
+    );
+  }
+});
+
+process.on("SIGTERM", () => {
+  stopJobQueue().finally(() => process.exit(0));
 });

@@ -54,6 +54,14 @@ enum ScoringType {
   HEAD_TO_HEAD
 }
 
+/// FPL chips a squad can play once per season
+enum ChipType {
+  TRIPLE_CAPTAIN
+  BENCH_BOOST
+  FREE_HIT
+  WILDCARD
+}
+
 /// Types of USDC financial transactions
 enum TransactionType {
   ENTRY_FEE
@@ -175,6 +183,8 @@ model Gameweek {
   deadline   DateTime
   isCurrent  Boolean  @default(false) @map("is_current")
   isFinished Boolean  @default(false) @map("is_finished")
+  isLocked   Boolean   @default(false) @map("is_locked")
+  settledAt  DateTime? @map("settled_at")
   season     String
 
   // Relations
@@ -183,6 +193,8 @@ model Gameweek {
   squadScores     SquadGameweekScore[]
   leaguesStarting League[]              @relation("LeagueStartGW")
   leaguesEnding   League[]              @relation("LeagueEndGW")
+  chipUsages      SquadChipUsage[]
+  leagueFixtures  LeagueFixture[]
 
   @@map("gameweeks")
 }
@@ -248,6 +260,7 @@ model Squad {
   players        SquadPlayer[]
   gameweekScores SquadGameweekScore[]
   memberships    LeagueMember[]
+  chipUsages     SquadChipUsage[]
 
   @@map("squads")
 }
@@ -297,6 +310,7 @@ model League {
   endGameweek   Gameweek       @relation("LeagueEndGW", fields: [endGameweekId], references: [id])
   members       LeagueMember[]
   transactions  Transaction[]
+  fixtures      LeagueFixture[]
 
   @@map("leagues")
 }
@@ -316,11 +330,21 @@ model LeagueMember {
   rank           Int?
   totalPoints    Int              @default(0) @map("total_points")
 
+  // Head-to-head statistics
+  matchesWon     Int              @default(0) @map("matches_won")
+  matchesDrawn   Int              @default(0) @map("matches_drawn")
+  matchesLost    Int              @default(0) @map("matches_lost")
+  pointsFor      Int              @default(0) @map("points_for")
+  pointsAgainst  Int              @default(0) @map("points_against")
+  h2hPoints      Int              @default(0) @map("h2h_points")
+
   // Relations
-  league       League        @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  user         User          @relation(fields: [userId], references: [id])
-  squad        Squad         @relation(fields: [squadId], references: [id])
+  league       League          @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id])
+  squad        Squad           @relation(fields: [squadId], references: [id])
   transactions Transaction[]
+  homeFixtures LeagueFixture[] @relation("HomeLeagueFixtures")
+  awayFixtures LeagueFixture[] @relation("AwayLeagueFixtures")
 
   @@unique([leagueId, userId])
   @@map("league_members")
@@ -334,6 +358,7 @@ model SquadGameweekScore {
   points        Int      @default(0)
   benchPoints   Int      @default(0) @map("bench_points")
   captainPoints Int      @default(0) @map("captain_points")
+  transferCost  Int      @default(0) @map("transfer_cost")
   calculatedAt  DateTime @default(now()) @map("calculated_at")
 
   // Relations
@@ -354,7 +379,7 @@ model Transaction {
   amount         Decimal           @db.Decimal(10, 2)
   asset          String            @default("USDC")
   assetIssuer    String?           @map("asset_issuer")
-  stellarTxHash  String?           @unique @map("stellar_tx_hash")
+  stellarTxHash  String?           @map("stellar_tx_hash")
   ledgerSeq      Int?              @map("ledger_seq")
   memo           String?
   status         TransactionStatus @default(PENDING)
@@ -367,5 +392,51 @@ model Transaction {
   league League?       @relation(fields: [leagueId], references: [id])
   member LeagueMember? @relation(fields: [memberId], references: [id])
 
+  // A batched refund shares one Stellar hash across several members
+  @@unique([stellarTxHash, memberId])
   @@map("transactions")
+}
+
+/// A chip played by a squad for a gameweek.
+/// Each chip can be used once per season, and only one chip per gameweek.
+model SquadChipUsage {
+  id              Int       @id @default(autoincrement())
+  squadId         String    @map("squad_id")
+  gameweekId      Int       @map("gameweek_id")
+  chipType        ChipType  @map("chip_type")
+  season          String
+  usedAt          DateTime  @default(now()) @map("used_at")
+  /// Free Hit only: the squad's lineup before the chip, restored after the gameweek
+  previousLineup  Json?     @map("previous_lineup")
+  revertedAt      DateTime? @map("reverted_at")
+
+  // Relations
+  squad    Squad    @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  gameweek Gameweek @relation(fields: [gameweekId], references: [id])
+
+  @@unique([squadId, season, chipType])
+  @@unique([squadId, gameweekId])
+  @@map("squad_chip_usages")
+}
+
+/// A head-to-head match between two league members in a gameweek.
+/// awayMemberId is null when the home member plays the league 'Average' team.
+model LeagueFixture {
+  id           String  @id @default(uuid())
+  leagueId     String  @map("league_id")
+  gameweekId   Int     @map("gameweek_id")
+  homeMemberId String  @map("home_member_id")
+  awayMemberId String? @map("away_member_id")
+  homeScore    Int?    @map("home_score")
+  awayScore    Int?    @map("away_score")
+  isFinished   Boolean @default(false) @map("is_finished")
+
+  // Relations
+  league     League        @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  gameweek   Gameweek      @relation(fields: [gameweekId], references: [id])
+  homeMember LeagueMember  @relation("HomeLeagueFixtures", fields: [homeMemberId], references: [id], onDelete: Cascade)
+  awayMember LeagueMember? @relation("AwayLeagueFixtures", fields: [awayMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([leagueId, gameweekId, homeMemberId])
+  @@map("league_fixtures")
 }
