@@ -1,0 +1,62 @@
+name: Drips Wave Issue
+description: File a scoped task or feature for Drips Wave contributors
+title: "[Category]: "
+labels:
+  - "help wanted"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for submitting a Drips Wave contribution issue! Please provide detailed specifications to ensure contributors have clear scope, guardrails, and acceptance criteria.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done and why
+      placeholder: Describe the problem, background context, and what needs to be implemented.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Clear, checkable conditions for "done"
+      placeholder: |
+        - [ ] All unit tests pass
+        - [ ] Expected functionality operates correctly without regressions
+        - [ ] Scope boundaries respected
+    validations:
+      required: true
+  - type: textarea
+    id: suggested-files
+    attributes:
+      label: Suggested Files
+      description: Relevant files/paths this issue touches
+      placeholder: |
+        - `frontend/src/...`
+        - `backend/src/...`
+        - `contracts/src/lib.rs`
+    validations:
+      required: false
+  - type: dropdown
+    id: suggested-complexity
+    attributes:
+      label: Suggested Complexity
+      description: Estimated difficulty and scope of the task
+      options:
+        - Trivial
+        - Medium
+        - High
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Relative importance and scheduling priority
+      options:
+        - Low
+        - Medium
+        - High
+    validations:
+      required: true
