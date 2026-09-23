@@ -1,5 +1,9 @@
 import { prisma } from "../../config/db.js";
-import { CreateSquadInput, UpdateSquadInput } from "../../types/index.js";
+import {
+  ChipType,
+  CreateSquadInput,
+  UpdateSquadInput,
+} from "../../types/index.js";
 import {
   SquadValidator,
   SquadValidationError,
@@ -17,6 +21,30 @@ export class SquadForbiddenError extends Error {
     super(message);
     this.name = "SquadForbiddenError";
   }
+}
+
+/**
+ * Thrown when a chip cannot be played (already used this season, or another
+ * chip is already active for the gameweek).
+ */
+export class ChipUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChipUnavailableError";
+  }
+}
+
+/** Lineup snapshot stored when Free Hit is played, restored after the gameweek. */
+interface FreeHitSnapshot {
+  budgetRemaining: string;
+  players: Array<{
+    playerId: number;
+    isCaptain: boolean;
+    isViceCaptain: boolean;
+    isStarter: boolean;
+    positionOrder: number;
+    purchasePrice: string;
+  }>;
 }
 
 /**
@@ -153,6 +181,14 @@ export class SquadService {
       SquadValidator.validateDeadline(currentGameweek.deadline);
     }
 
+    // Squads stay locked from the deadline lock until the gameweek is settled
+    const lockedGameweek = await prisma.gameweek.findFirst({
+      where: { isLocked: true, settledAt: null },
+    });
+    if (lockedGameweek) {
+      throw new SquadLockedError(lockedGameweek.deadline);
+    }
+
     // Fetch players for validation
     const playerIds = input.players.map((p) => p.playerId);
     const dbPlayers = await prisma.player.findMany({
@@ -228,6 +264,144 @@ export class SquadService {
         },
       });
     });
+  }
+
+  /**
+   * Plays a chip for a gameweek before its deadline.
+   * Each chip can be used once per season and only one chip per gameweek.
+   * Free Hit snapshots the current lineup so it can be restored after the gameweek.
+   */
+  public async activateChip(
+    squadId: string,
+    chipType: ChipType,
+    gameweekId: number,
+    requestingUserId: string
+  ) {
+    if (!Object.values(ChipType).includes(chipType)) {
+      throw new SquadValidationError(`Invalid chip type: ${chipType}`);
+    }
+
+    const squad = await this.db.squad.findUnique({
+      where: { id: squadId },
+      include: { players: true },
+    });
+    if (!squad) {
+      throw new SquadValidationError(`Squad ${squadId} not found`);
+    }
+    if (squad.userId !== requestingUserId) {
+      throw new SquadForbiddenError(
+        "You are not authorized to play chips for this squad"
+      );
+    }
+
+    const gameweek = await this.db.gameweek.findUnique({
+      where: { id: gameweekId },
+    });
+    if (!gameweek) {
+      throw new SquadValidationError(`Gameweek ${gameweekId} not found`);
+    }
+    if (gameweek.isLocked) {
+      throw new SquadLockedError(gameweek.deadline);
+    }
+    SquadValidator.validateDeadline(gameweek.deadline);
+
+    const [usedThisGameweek, usedThisSeason] = await Promise.all([
+      this.db.squadChipUsage.findUnique({
+        where: { squadId_gameweekId: { squadId, gameweekId } },
+      }),
+      this.db.squadChipUsage.findUnique({
+        where: {
+          squadId_season_chipType: {
+            squadId,
+            season: gameweek.season,
+            chipType,
+          },
+        },
+      }),
+    ]);
+
+    if (usedThisGameweek) {
+      throw new ChipUnavailableError(
+        `A chip (${usedThisGameweek.chipType}) is already active for ${gameweek.name}`
+      );
+    }
+    if (usedThisSeason) {
+      throw new ChipUnavailableError(
+        `${chipType} has already been used this season`
+      );
+    }
+
+    let previousLineup: FreeHitSnapshot | undefined;
+    if (chipType === ChipType.FREE_HIT) {
+      previousLineup = {
+        budgetRemaining: squad.budgetRemaining.toString(),
+        players: squad.players.map((sp: any) => ({
+          playerId: sp.playerId,
+          isCaptain: sp.isCaptain,
+          isViceCaptain: sp.isViceCaptain,
+          isStarter: sp.isStarter,
+          positionOrder: sp.positionOrder,
+          purchasePrice: sp.purchasePrice.toString(),
+        })),
+      };
+    }
+
+    try {
+      return await this.db.squadChipUsage.create({
+        data: {
+          squadId,
+          gameweekId,
+          chipType,
+          season: gameweek.season,
+          previousLineup,
+        },
+      });
+    } catch (error: any) {
+      // Unique constraints enforce the chip rules under concurrent requests
+      if (error?.code === "P2002") {
+        throw new ChipUnavailableError(
+          `${chipType} cannot be played: a chip is already active for this gameweek or was used this season`
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Restores the lineup saved when Free Hit was played for a completed gameweek.
+   * Returns false when there is nothing to revert (no Free Hit, or already reverted).
+   */
+  public async revertFreeHit(squadId: string, gameweekId: number): Promise<boolean> {
+    const usage = await this.db.squadChipUsage.findUnique({
+      where: { squadId_gameweekId: { squadId, gameweekId } },
+    });
+    if (
+      !usage ||
+      usage.chipType !== ChipType.FREE_HIT ||
+      usage.revertedAt ||
+      !usage.previousLineup
+    ) {
+      return false;
+    }
+
+    const snapshot = usage.previousLineup as FreeHitSnapshot;
+
+    await this.db.$transaction(async (tx: any) => {
+      await tx.squadPlayer.deleteMany({ where: { squadId } });
+      await tx.squadPlayer.createMany({
+        data: snapshot.players.map((p) => ({ squadId, ...p })),
+      });
+      await tx.squad.update({
+        where: { id: squadId },
+        data: { budgetRemaining: snapshot.budgetRemaining },
+      });
+      await tx.squadChipUsage.update({
+        where: { id: usage.id },
+        data: { revertedAt: new Date() },
+      });
+    });
+
+    return true;
   }
 
   /**

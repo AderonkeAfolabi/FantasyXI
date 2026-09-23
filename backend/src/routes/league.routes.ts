@@ -6,6 +6,7 @@ import {
   joinLeague,
   getLeagueMembers,
   getLeagueStandings,
+  getH2HStandings,
   cancelLeague,
 } from "../controllers/league.controller.js";
 import { requireAuth } from "../middleware/authMiddleware.js";
@@ -29,6 +30,9 @@ router.get("/:id/members", getLeagueMembers);
 
 // GET /api/v1/leagues/:id/standings (Public: view league standings)
 router.get("/:id/standings", getLeagueStandings);
+
+// GET /api/v1/leagues/:id/h2h-standings (Public: head-to-head league table)
+router.get("/:id/h2h-standings", getH2HStandings);
 
 // POST /api/v1/leagues/:id/cancel (Protected: creator only)
 router.post("/:id/cancel", requireAuth, cancelLeague);

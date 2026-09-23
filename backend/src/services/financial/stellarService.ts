@@ -12,6 +12,7 @@ import {
   TransactionBuilder,
   Networks,
   Address,
+  Keypair,
   scValToNative,
 } from "@stellar/stellar-sdk";
 import { getHorizonServer, stellarConfig } from "../../config/stellar.js";
@@ -19,6 +20,7 @@ import { PaymentVerificationResult } from "../../types/index.js";
 import {
   SorobanContractClient,
   OnChainLeagueState,
+  InvocationResult,
 } from "./sorobanContractClient.js";
 
 export interface VerifyPaymentParams {
@@ -433,6 +435,25 @@ export class StellarService {
       throw new Error("Soroban contract client is not configured");
     }
     return client.getTokenBalance(addressOrContractId);
+  }
+
+  /**
+   * Refund escrowed deposits for a batch of participants via the admin keypair.
+   */
+  public async refundParticipants(
+    leagueId: number | bigint,
+    participants: string[]
+  ): Promise<InvocationResult> {
+    const client = this.getSorobanClient();
+    if (!client) {
+      throw new Error("Soroban contract client is not configured");
+    }
+    const adminSecret = process.env.TESTNET_ADMIN_SECRET;
+    if (!adminSecret) {
+      throw new Error("TESTNET_ADMIN_SECRET is required to execute refunds");
+    }
+    const adminPublic = Keypair.fromSecret(adminSecret).publicKey();
+    return client.refund(adminSecret, adminPublic, leagueId, participants);
   }
 
   /**
