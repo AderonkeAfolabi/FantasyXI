@@ -103,6 +103,8 @@ model User {
   googleId      String?  @unique @map("google_id")
   countryCode   String?  @map("country_code")
   role          UserRole @default(USER)
+  referrerId    String?  @map("referrer_id")
+  referralCode  String?  @unique @map("referral_code")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -112,6 +114,8 @@ model User {
   createdLeagues League[]       @relation("LeagueCreator")
   memberships   LeagueMember[]
   transactions  Transaction[]
+  referrer      User?          @relation("UserReferrals", fields: [referrerId], references: [id])
+  referrees     User[]         @relation("UserReferrals")
 
   @@map("users")
 }
@@ -208,6 +212,7 @@ model Gameweek {
   leaguesEnding   League[]              @relation("LeagueEndGW")
   chipUsages      SquadChipUsage[]
   leagueFixtures  LeagueFixture[]
+  transfers       SquadTransfer[]
 
   @@map("gameweeks")
 }
@@ -277,6 +282,7 @@ model Squad {
   gameweekScores SquadGameweekScore[]
   memberships    LeagueMember[]
   chipUsages     SquadChipUsage[]
+  transfers      SquadTransfer[]
 
   @@map("squads")
 }
