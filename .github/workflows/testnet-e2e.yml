@@ -1,0 +1,49 @@
+name: Testnet E2E Simulation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Run every Sunday at midnight
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Stellar CLI
+        run: |
+          mkdir -p tools/bin
+          curl -sL https://github.com/stellar/stellar-cli/releases/latest/download/stellar-cli-linux-amd64.tar.gz | tar -xz
+          mv stellar tools/bin/stellar
+          chmod +x tools/bin/stellar
+          echo "${GITHUB_WORKSPACE}/tools/bin" >> $GITHUB_PATH
+
+      - name: Build Soroban Contract
+        working-directory: ./contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install E2E Dependencies
+        working-directory: ./tools/e2e
+        run: npm install
+
+      - name: Run Lifecycle Simulation
+        working-directory: ./tools/e2e
+        run: npm run simulate
