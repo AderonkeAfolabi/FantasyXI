@@ -17,6 +17,8 @@ pub enum EscrowError {
     InvalidAmount = 8,
     PayoutExceedsDeposits = 9,
     NotAuthorized = 10,
+    FeeExceedsMaxCap = 11,
+    InvalidPrizeDistribution = 12,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -191,16 +193,48 @@ impl FantasyXIEscrow {
             return Err(EscrowError::AlreadySettled);
         }
 
-        // Calculate total payout required
+        // Platform Fee Hard Cap check
+        let max_fee = (league.total_deposited * 500) / 10000;
+        if platform_fee > max_fee {
+            return Err(EscrowError::FeeExceedsMaxCap);
+        }
+
+        // Calculate expected distributions based on prize curve rules
+        let prize_pool = league.total_deposited - platform_fee;
+        let mut expected_payouts = Vec::new(&env);
+        if winners.len() == 1 {
+            expected_payouts.push_back(prize_pool);
+        } else if winners.len() == 2 {
+            let p1 = (prize_pool * 70) / 100;
+            let p2 = prize_pool - p1;
+            expected_payouts.push_back(p1);
+            expected_payouts.push_back(p2);
+        } else if winners.len() >= 3 {
+            let p1 = (prize_pool * 60) / 100;
+            let p2 = (prize_pool * 30) / 100;
+            let p3 = prize_pool - p1 - p2;
+            expected_payouts.push_back(p1);
+            expected_payouts.push_back(p2);
+            expected_payouts.push_back(p3);
+            for _ in 3..winners.len() {
+                expected_payouts.push_back(0);
+            }
+        } else {
+            return Err(EscrowError::InvalidPrizeDistribution);
+        }
+
         let mut total_payout = platform_fee;
-        for winner in winners.iter() {
+        for (i, winner) in winners.iter().enumerate() {
             if winner.amount < 0 {
                 return Err(EscrowError::InvalidAmount);
+            }
+            if winner.amount != expected_payouts.get(i as u32).unwrap() {
+                return Err(EscrowError::InvalidPrizeDistribution);
             }
             total_payout += winner.amount;
         }
 
-        if total_payout > league.total_deposited {
+        if total_payout != league.total_deposited {
             return Err(EscrowError::PayoutExceedsDeposits);
         }
 
@@ -453,7 +487,7 @@ mod test {
         client.create_league(&admin, &203, &50_000_000, &token_addr);
         client.deposit(&user1, &203); // Total deposited = 50_000_000
 
-        // Attempt payout of 100_000_000
+        // Attempt payout of 90_000_000, fee 10_000_000 (fee exceeds cap)
         let winners = vec![
             &env,
             WinnerPayout {
@@ -463,7 +497,18 @@ mod test {
         ];
 
         let result = client.try_settle(&admin, &203, &winners, &treasury, &10_000_000);
-        assert_eq!(result, Err(Ok(EscrowError::PayoutExceedsDeposits)));
+        assert_eq!(result, Err(Ok(EscrowError::FeeExceedsMaxCap)));
+
+        // Attempt payout exceeding deposits with valid fee
+        let winners2 = vec![
+            &env,
+            WinnerPayout {
+                winner: user1.clone(),
+                amount: 90_000_000,
+            },
+        ];
+        let result2 = client.try_settle(&admin, &203, &winners2, &treasury, &2_500_000);
+        assert_eq!(result2, Err(Ok(EscrowError::InvalidPrizeDistribution)));
     }
 
     #[test]
@@ -535,24 +580,24 @@ mod test {
             &env,
             WinnerPayout {
                 winner: user1.clone(),
-                amount: 45_000_000,
+                amount: 47_500_000,
             },
         ];
-        client.settle(&admin, &400, &usdc_winners, &treasury, &5_000_000);
+        client.settle(&admin, &400, &usdc_winners, &treasury, &2_500_000);
 
         let xlm_winners = vec![
             &env,
             WinnerPayout {
                 winner: user2.clone(),
-                amount: 140_000_000,
+                amount: 142_500_000,
             },
         ];
-        client.settle(&admin, &401, &xlm_winners, &treasury, &10_000_000);
+        client.settle(&admin, &401, &xlm_winners, &treasury, &7_500_000);
 
-        assert_eq!(usdc_client.balance(&user1), 95_000_000);
-        assert_eq!(usdc_client.balance(&treasury), 5_000_000);
-        assert_eq!(xlm_client.balance(&user2), 190_000_000);
-        assert_eq!(xlm_client.balance(&treasury), 10_000_000);
+        assert_eq!(usdc_client.balance(&user1), 97_500_000);
+        assert_eq!(usdc_client.balance(&treasury), 2_500_000);
+        assert_eq!(xlm_client.balance(&user2), 192_500_000);
+        assert_eq!(xlm_client.balance(&treasury), 7_500_000);
     }
 
     #[test]
@@ -578,5 +623,40 @@ mod test {
         client.settle(&admin, &500, &winners, &treasury, &0);
         let settled_league = client.get_league(&500).unwrap();
         assert_eq!(settled_league.status, LeagueStatus::Settled);
+    }
+
+    #[test]
+    fn test_fractional_stroop_roundings() {
+        let (env, admin, token_addr, client) = setup_test();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_addr);
+
+        let u1 = Address::generate(&env);
+        let u2 = Address::generate(&env);
+        let u3 = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        token_admin_client.mint(&u1, &10_000_011);
+        client.create_league(&admin, &600, &10_000_011, &token_addr);
+        client.deposit(&u1, &600);
+
+        let platform_fee = 500_000;
+        let prize_pool = 10_000_011 - 500_000; // 9_500_011
+        // 60% = 5_700_006
+        // 30% = 2_850_003
+        // 10% (remainder) = 9_500_011 - 5_700_006 - 2_850_003 = 950_002
+        
+        let winners = vec![
+            &env,
+            WinnerPayout { winner: u1.clone(), amount: 5_700_006 },
+            WinnerPayout { winner: u2.clone(), amount: 2_850_003 },
+            WinnerPayout { winner: u3.clone(), amount: 950_002 },
+        ];
+
+        client.settle(&admin, &600, &winners, &treasury, &platform_fee);
+
+        let token_client = token::Client::new(&env, &token_addr);
+        assert_eq!(token_client.balance(&u1), 5_700_006);
+        assert_eq!(token_client.balance(&u2), 2_850_003);
+        assert_eq!(token_client.balance(&u3), 950_002);
     }
 }
