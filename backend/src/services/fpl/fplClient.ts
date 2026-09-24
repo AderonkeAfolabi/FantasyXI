@@ -21,9 +21,59 @@ interface CacheEntry<T> {
 export class FplClient {
   private cache = new Map<string, CacheEntry<unknown>>();
   private baseUrl: string;
+  
+  // Circuit breaker state
+  private consecutiveFailures = 0;
+  private circuitOpenUntil = 0;
 
   constructor(baseUrl: string = FPL_BASE_URL) {
     this.baseUrl = baseUrl;
+  }
+
+  private async fetchWithRetry(url: string, retries = 3, backoffMs = 1000): Promise<Response> {
+    if (Date.now() < this.circuitOpenUntil) {
+      const remaining = Math.ceil((this.circuitOpenUntil - Date.now()) / 1000);
+      throw new Error(`FPL API Circuit Breaker is open. Skipping request. Try again in ${remaining}s.`);
+    }
+
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "FantasyXI-App/1.0 (Educational open-source fantasy football project)",
+            Accept: "application/json",
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (response.ok) {
+          this.consecutiveFailures = 0;
+          return response;
+        }
+
+        // Retry on rate limit (429) or server errors (5xx)
+        if (response.status === 429 || response.status >= 500) {
+          throw new Error(`FPL API failed: [${response.status}] ${response.statusText}`);
+        }
+
+        // Do not retry on client errors (400-404)
+        return response;
+      } catch (err) {
+        if (i === retries - 1) {
+          this.consecutiveFailures++;
+          if (this.consecutiveFailures >= 5) {
+            console.warn("🚨 FPL API Circuit Breaker tripped! Pausing upstream requests for 60 seconds.");
+            this.circuitOpenUntil = Date.now() + 60_000;
+          }
+          throw err;
+        }
+        // Exponential backoff
+        const delay = backoffMs * Math.pow(2, i);
+        console.warn(`⚠️ FPL API request failed. Retrying in ${delay}ms... (Attempt ${i + 1}/${retries})`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw new Error("Unreachable");
   }
 
   /**
@@ -38,18 +88,11 @@ export class FplClient {
     }
 
     const url = `${this.baseUrl}${endpoint}`;
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "FantasyXI-App/1.0 (Educational open-source fantasy football project)",
-        Accept: "application/json",
-      },
-      signal: AbortSignal.timeout(10000),
-    });
+    const response = await this.fetchWithRetry(url);
 
     if (!response.ok) {
       throw new Error(
-        `FPL API request failed: [${response.status}] ${response.statusText} at ${url}`
+        `FPL API request failed permanently: [${response.status}] ${response.statusText} at ${url}`
       );
     }
 
