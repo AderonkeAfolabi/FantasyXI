@@ -34,11 +34,13 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             contracts/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock', 'contracts/.cargo/config.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Run cargo build
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: "-C target-feature=-reference-types"
         run: |
           cargo build --verbose
           cargo build --target wasm32-unknown-unknown --release --verbose
