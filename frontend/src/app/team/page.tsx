@@ -20,39 +20,25 @@ import {
 import { Button } from "@/components/ui/Button";
 import { PositionBadge } from "@/components/ui/Badge";
 
-interface LocalSquadPlayer {
-  id?: number | string;
-  playerId: number;
-  player: Player;
-  isStarter: boolean;
-  isCaptain: boolean;
-  isViceCaptain: boolean;
-  positionOrder: number;
-}
+import { useTeamStore, LocalSquadPlayer } from "@/store/teamStore";
 
 export default function TeamPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
 
-  const [squadId, setSquadId] = useState<string | null>(null);
-  const [squadName, setSquadName] = useState<string>("My Fantasy XI");
-  const [players, setPlayers] = useState<LocalSquadPlayer[]>([]);
+  const { 
+    squadId, setSquadId, 
+    squadName, setSquadName, 
+    players, setPlayers, 
+    selectedPlayerId, setSelectedPlayerId,
+    activeModalState, setActiveModalState,
+    handleSwap, handleSetCaptain, handleSetViceCaptain
+  } = useTeamStore();
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Active interaction states
-  const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
-  const [activeModalState, setActiveModalState] = useState<{
-    isOpen: boolean;
-    requiredPosition: Position | null;
-    replacingPlayer: Player | null;
-  }>({
-    isOpen: false,
-    requiredPosition: null,
-    replacingPlayer: null,
-  });
 
   // Load existing squad
   useEffect(() => {
@@ -289,75 +275,6 @@ export default function TeamPage() {
     setSelectedPlayerId(selectedPlayerId === clickedPlayer.id ? null : clickedPlayer.id);
   };
 
-  // Swap logic between two players
-  const handleSwap = (playerAId: number, playerBId: number) => {
-    setPlayers((prev) => {
-      const idxA = prev.findIndex((p) => p.playerId === playerAId);
-      const idxB = prev.findIndex((p) => p.playerId === playerBId);
-      if (idxA === -1 || idxB === -1) return prev;
-
-      const clone = [...prev];
-      const a = { ...clone[idxA] };
-      const b = { ...clone[idxB] };
-
-      // Swap starter / bench status & positionOrder
-      const tempStarter = a.isStarter;
-      const tempOrder = a.positionOrder;
-
-      a.isStarter = b.isStarter;
-      a.positionOrder = b.positionOrder;
-
-      b.isStarter = tempStarter;
-      b.positionOrder = tempOrder;
-
-      // Handle captaincy if starter moves to bench
-      if (!a.isStarter && a.isCaptain) {
-        a.isCaptain = false;
-        b.isCaptain = true;
-      }
-      if (!a.isStarter && a.isViceCaptain) {
-        a.isViceCaptain = false;
-        b.isViceCaptain = true;
-      }
-      if (!b.isStarter && b.isCaptain) {
-        b.isCaptain = false;
-        a.isCaptain = true;
-      }
-      if (!b.isStarter && b.isViceCaptain) {
-        b.isViceCaptain = false;
-        a.isViceCaptain = true;
-      }
-
-      clone[idxA] = a;
-      clone[idxB] = b;
-      return clone;
-    });
-  };
-
-  // Set Captain
-  const handleSetCaptain = (playerId: number) => {
-    setPlayers((prev) =>
-      prev.map((p) => ({
-        ...p,
-        isCaptain: p.playerId === playerId,
-        // If they were vice-captain, clear vice-captain
-        isViceCaptain: p.playerId === playerId ? false : p.isViceCaptain,
-      }))
-    );
-  };
-
-  // Set Vice-Captain
-  const handleSetViceCaptain = (playerId: number) => {
-    setPlayers((prev) =>
-      prev.map((p) => ({
-        ...p,
-        isViceCaptain: p.playerId === playerId,
-        // If they were captain, clear captain
-        isCaptain: p.playerId === playerId ? false : p.isCaptain,
-      }))
-    );
-  };
-
   // Transfer player (replace with someone from picker)
   const handleReplacePlayer = (newPlayer: Player) => {
     const replacing = activeModalState.replacingPlayer;
@@ -490,9 +407,6 @@ export default function TeamPage() {
 
       {/* Budget & Squad Constraints Bar */}
       <BudgetBar
-        spent={totalSpent}
-        playerCount={players.length}
-        clubCounts={clubCounts}
         onAutoPick={handleAutoPick}
         onReset={() => {
           setPlayers([]);
@@ -589,18 +503,10 @@ export default function TeamPage() {
       )}
 
       {/* Main Pitch View */}
-      <Pitch
-        starters={starters}
-        selectedPlayerId={selectedPlayerId}
-        onPlayerClick={(player, position) => handlePlayerClick(player, position)}
-      />
+      <Pitch />
 
       {/* Dugout Substitute Bench */}
-      <Bench
-        benchPlayers={bench}
-        selectedPlayerId={selectedPlayerId}
-        onPlayerClick={(player) => handlePlayerClick(player)}
-      />
+      <Bench />
 
       {/* Transfer & Player Picker Modal */}
       <PlayerPickerModal

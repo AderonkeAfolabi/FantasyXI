@@ -5,6 +5,8 @@ import { Player, Position } from "@/types";
 import { PositionBadge } from "@/components/ui/Badge";
 import { IconFootball, IconSwap } from "@/components/ui/Icons";
 
+import { useTeamStore } from "@/store/teamStore";
+
 export interface PlayerCardProps {
   player?: Player | null;
   positionSlot: Position;
@@ -12,9 +14,7 @@ export interface PlayerCardProps {
   isCaptain?: boolean;
   isViceCaptain?: boolean;
   benchIndex?: number; // 0 for sub keeper, 1, 2, 3 for outfield
-  isSelectedForSwap?: boolean;
   isSwapCandidate?: boolean;
-  onClick?: () => void;
   onQuickAction?: (action: "captain" | "vice" | "swap" | "transfer") => void;
 }
 
@@ -25,10 +25,13 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   isCaptain = false,
   isViceCaptain = false,
   benchIndex,
-  isSelectedForSwap = false,
   isSwapCandidate = false,
-  onClick,
 }) => {
+  const isSelectedForSwap = useTeamStore(
+    (state) => state.selectedPlayerId !== null && player?.id === state.selectedPlayerId
+  );
+  const handlePlayerClick = useTeamStore((state) => state.handlePlayerClick);
+  const onClick = () => handlePlayerClick(player || null, positionSlot);
   // Empty slot (when building or drafting)
   if (!player) {
     return (

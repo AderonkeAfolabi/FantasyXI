@@ -5,23 +5,13 @@ import { Position, SquadPlayer, Player } from "@/types";
 import { PlayerCard } from "./PlayerCard";
 import { detectFormation } from "@/lib/formation";
 
-export interface PitchProps {
-  starters: Array<{
-    id?: number | string;
-    player?: Player | null;
-    isCaptain?: boolean;
-    isViceCaptain?: boolean;
-    positionOrder?: number;
-  }>;
-  selectedPlayerId?: number | null;
-  onPlayerClick?: (player: Player | null, position: Position, slotIndex: number) => void;
-}
+import { useTeamStore } from "@/store/teamStore";
 
-export const Pitch: React.FC<PitchProps> = ({
-  starters,
-  selectedPlayerId,
-  onPlayerClick,
-}) => {
+export const Pitch: React.FC = () => {
+  const starters = useTeamStore((state) => 
+    state.players.filter((p) => p.isStarter).sort((a, b) => a.positionOrder - b.positionOrder)
+  );
+  
   // Group starters by position
   const gkpStarters = starters.filter(
     (s) => s.player?.position === Position.GKP
@@ -78,7 +68,6 @@ export const Pitch: React.FC<PitchProps> = ({
         {/* Row 1: Goalkeeper (GKP) */}
         <div className="relative z-10 flex justify-center items-center py-2">
           {gkpSlots.map((item, idx) => {
-            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
             return (
               <PlayerCard
                 key={`gkp-${idx}`}
@@ -87,8 +76,6 @@ export const Pitch: React.FC<PitchProps> = ({
                 isStarter={true}
                 isCaptain={item?.isCaptain}
                 isViceCaptain={item?.isViceCaptain}
-                isSelectedForSwap={isSelected}
-                onClick={() => onPlayerClick?.(item?.player || null, Position.GKP, idx)}
               />
             );
           })}
@@ -97,7 +84,6 @@ export const Pitch: React.FC<PitchProps> = ({
         {/* Row 2: Defenders (DEF) */}
         <div className="relative z-10 flex justify-around items-center py-2 gap-1 sm:gap-2">
           {defSlots.map((item, idx) => {
-            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
             return (
               <PlayerCard
                 key={`def-${idx}`}
@@ -106,8 +92,6 @@ export const Pitch: React.FC<PitchProps> = ({
                 isStarter={true}
                 isCaptain={item?.isCaptain}
                 isViceCaptain={item?.isViceCaptain}
-                isSelectedForSwap={isSelected}
-                onClick={() => onPlayerClick?.(item?.player || null, Position.DEF, idx)}
               />
             );
           })}
@@ -116,7 +100,6 @@ export const Pitch: React.FC<PitchProps> = ({
         {/* Row 3: Midfielders (MID) */}
         <div className="relative z-10 flex justify-around items-center py-2 gap-1 sm:gap-2">
           {midSlots.map((item, idx) => {
-            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
             return (
               <PlayerCard
                 key={`mid-${idx}`}
@@ -125,8 +108,6 @@ export const Pitch: React.FC<PitchProps> = ({
                 isStarter={true}
                 isCaptain={item?.isCaptain}
                 isViceCaptain={item?.isViceCaptain}
-                isSelectedForSwap={isSelected}
-                onClick={() => onPlayerClick?.(item?.player || null, Position.MID, idx)}
               />
             );
           })}
@@ -135,7 +116,6 @@ export const Pitch: React.FC<PitchProps> = ({
         {/* Row 4: Forwards (FWD) */}
         <div className="relative z-10 flex justify-around items-center py-2 gap-1 sm:gap-2">
           {fwdSlots.map((item, idx) => {
-            const isSelected = !!item?.player && item.player.id === selectedPlayerId;
             return (
               <PlayerCard
                 key={`fwd-${idx}`}
@@ -144,8 +124,6 @@ export const Pitch: React.FC<PitchProps> = ({
                 isStarter={true}
                 isCaptain={item?.isCaptain}
                 isViceCaptain={item?.isViceCaptain}
-                isSelectedForSwap={isSelected}
-                onClick={() => onPlayerClick?.(item?.player || null, Position.FWD, idx)}
               />
             );
           })}

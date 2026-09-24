@@ -4,23 +4,12 @@ import React from "react";
 import { Position, SquadPlayer, Player } from "@/types";
 import { PlayerCard } from "./PlayerCard";
 
-export interface BenchProps {
-  benchPlayers: Array<{
-    id?: number | string;
-    player?: Player | null;
-    isCaptain?: boolean;
-    isViceCaptain?: boolean;
-    positionOrder?: number;
-  }>;
-  selectedPlayerId?: number | null;
-  onPlayerClick?: (player: Player | null, index: number) => void;
-}
+import { useTeamStore } from "@/store/teamStore";
 
-export const Bench: React.FC<BenchProps> = ({
-  benchPlayers,
-  selectedPlayerId,
-  onPlayerClick,
-}) => {
+export const Bench: React.FC = () => {
+  const benchPlayers = useTeamStore((state) => 
+    state.players.filter((p) => !p.isStarter).sort((a, b) => a.positionOrder - b.positionOrder)
+  );
   // Ensure exactly 4 slots (1 GK, 3 Outfield)
   const defaultSlots: Position[] = [
     Position.GKP,
@@ -47,8 +36,6 @@ export const Bench: React.FC<BenchProps> = ({
         {[0, 1, 2, 3].map((idx) => {
           const item = benchPlayers[idx];
           const slotPos = item?.player?.position || defaultSlots[idx];
-          const isSelected = !!item?.player && item.player.id === selectedPlayerId;
-
           return (
             <PlayerCard
               key={idx}
@@ -58,8 +45,6 @@ export const Bench: React.FC<BenchProps> = ({
               isCaptain={item?.isCaptain}
               isViceCaptain={item?.isViceCaptain}
               benchIndex={idx}
-              isSelectedForSwap={isSelected}
-              onClick={() => onPlayerClick?.(item?.player || null, idx)}
             />
           );
         })}
