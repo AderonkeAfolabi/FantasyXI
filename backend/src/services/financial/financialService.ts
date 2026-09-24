@@ -14,6 +14,7 @@ import { prisma } from "../../config/db.js";
 import { stellarConfig } from "../../config/stellar.js";
 import { StellarService, stellarService } from "./stellarService.js";
 import { PrizeService } from "../league/prizeService.js";
+import { createSettlementProof } from "./settlementProof.js";
 import {
   LeagueStatus,
   MembershipStatus,
@@ -517,6 +518,19 @@ export class FinancialService {
       });
     }
 
+    const proofHash = createSettlementProof({
+      leagueId: league.id,
+      grossPool: Number(distribution.grossTotal),
+      platformFee: Number(distribution.platformFee),
+      winners: winners.map((winner) => ({
+        rank: winner.rank,
+        userId: winner.userId,
+        stellarAddress: winner.stellarAddress,
+        totalPoints: winner.totalPoints,
+        prizeAmount: winner.prizeAmount,
+      })),
+    });
+
     return {
       leagueId: league.id,
       leagueName: league.name,
@@ -528,6 +542,7 @@ export class FinancialService {
       netPrizePool: distribution.prizePool,
       winners,
       canSettle: true,
+      proofHash,
     };
   }
 

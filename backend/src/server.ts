@@ -4,10 +4,17 @@ import dotenv from "dotenv";
 import apiV1Router from "./routes/index.js";
 import { startJobQueue, stopJobQueue, getQueueHealth } from "./queues/jobQueue.js";
 import { apiRateLimiter } from "./middleware/rateLimiter.js";
+import { ApolloServer } from "@apollo/server";
+import { expressMiddleware } from "@as-integrations/express5";
+import DataLoader from "dataloader";
+import { prisma } from "./config/db.js";
+import { resolvers } from "./graphql/resolvers.js";
+import { typeDefs } from "./graphql/schema.js";
 
 dotenv.config();
 
 const app = express();
+const apolloServer = new ApolloServer({ typeDefs, resolvers });
 
 // Trust reverse proxies (Cloudflare, Nginx, ALB) for accurate client IP rate limiting
 app.set("trust proxy", 1);
@@ -95,7 +102,36 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+async function startServer(): Promise<void> {
+  await apolloServer.start();
+  app.use(
+    "/graphql",
+    express.json(),
+    expressMiddleware(apolloServer, {
+      context: async () => ({
+        loaders: {
+          users: new DataLoader(async (ids) => {
+            const records = await prisma.user.findMany({
+              where: { id: { in: [...ids].map(String) } },
+              include: { wallet: true, squads: true, createdLeagues: true },
+            });
+            const byId = new Map(records.map((record) => [record.id, record]));
+            return ids.map((id) => byId.get(String(id)) ?? null);
+          }),
+          players: new DataLoader(async (ids) => {
+            const records = await prisma.player.findMany({
+              where: { id: { in: [...ids].map(Number) } },
+              include: { team: true },
+            });
+            const byId = new Map(records.map((record) => [record.id, record]));
+            return ids.map((id) => byId.get(Number(id)) ?? null);
+          }),
+        },
+      }),
+    }),
+  );
+
+  app.listen(PORT, () => {
   console.log(`
   ⚽ FantasyXI API Server
   ────────────────────────
@@ -111,6 +147,12 @@ app.listen(PORT, () => {
       console.error("[jobs] Failed to start job queue:", error)
     );
   }
+  });
+}
+
+startServer().catch((error) => {
+  console.error("Failed to start FantasyXI API:", error);
+  process.exitCode = 1;
 });
 
 process.on("SIGTERM", () => {

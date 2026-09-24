@@ -127,6 +127,16 @@ export interface Gameweek {
   season: string;
 }
 
+export interface GameweekHistoryEntry {
+  id: number;
+  points: number;
+  benchPoints: number;
+  captainPoints: number;
+  transferCost: number;
+  gameweek: Gameweek;
+  squad: Squad;
+}
+
 export interface PlayerGameweekStats {
   id: number;
   playerId: number;
@@ -414,4 +424,3 @@ export interface GameweekTimeline {
   };
   generatedAt: string;
 }
-
