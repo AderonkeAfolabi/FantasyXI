@@ -5,10 +5,9 @@ import { SQUAD_RULES } from "@/types";
 import { IconFootball, IconAlertCircle, IconRefresh } from "@/components/ui/Icons";
 import { Button } from "@/components/ui/Button";
 
+import { useTeamStore } from "@/store/teamStore";
+
 export interface BudgetBarProps {
-  spent: number; // in tenths, e.g. 985 = £98.5m
-  playerCount: number;
-  clubCounts?: Record<number | string, number>;
   onAutoPick?: () => void;
   onReset?: () => void;
   isSaving?: boolean;
@@ -17,15 +16,21 @@ export interface BudgetBarProps {
 }
 
 export const BudgetBar: React.FC<BudgetBarProps> = ({
-  spent,
-  playerCount,
-  clubCounts = {},
   onAutoPick,
   onReset,
   isSaving = false,
   onSave,
   canSave = false,
 }) => {
+  const players = useTeamStore((state) => state.players);
+  const spent = players.reduce((sum, p) => sum + (p.player?.price || 0), 0);
+  const playerCount = players.length;
+  const clubCounts: Record<number, number> = {};
+  players.forEach((p) => {
+    if (p.player?.teamId) {
+      clubCounts[p.player.teamId] = (clubCounts[p.player.teamId] || 0) + 1;
+    }
+  });
   const maxBudget = SQUAD_RULES.STARTING_BUDGET;
   const spentM = spent / 10;
   const remainingM = maxBudget - spentM;
