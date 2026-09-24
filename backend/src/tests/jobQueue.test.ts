@@ -1,8 +1,17 @@
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import { computeLockTime, LOCK_LEAD_MINUTES } from "../jobs/deadlineLocking.js";
 import { isGameweekReadyForSettlement } from "../jobs/gameweekSettlement.js";
 import { runWithMetrics, getQueueHealth, JOB_DEFINITIONS } from "../queues/jobQueue.js";
+import {
+  FPL_SYNC_RETRY_LIMIT,
+  FPL_SYNC_RETRY_DELAY_SECONDS,
+  fplSyncQueueConfig,
+  shouldRouteToDlq,
+  runFplSyncTaskWithRetry,
+  type FplSyncTask,
+} from "../queues/fplSyncQueue.js";
+import { fplSyncService } from "../services/fpl/fplSyncService.js";
 
 describe("Background Job Queue & Matchday Lifecycle", () => {
   it("locks squads 90 minutes before the first kickoff", () => {
@@ -56,5 +65,64 @@ describe("Background Job Queue & Matchday Lifecycle", () => {
     assert.equal(poll.succeeded, 1);
     assert.equal(poll.retried, 1);
     assert.equal(poll.lastError, "FPL API down");
+  });
+});
+
+describe("FPL Sync Queue Retry & Dead-Letter Queue", () => {
+  it("configures exponential backoff for failed sync attempts", () => {
+    const config = fplSyncQueueConfig();
+    assert.equal(config.retryBackoff, true);
+    assert.equal(config.retryDelay, FPL_SYNC_RETRY_DELAY_SECONDS);
+    assert.equal(config.retryLimit, FPL_SYNC_RETRY_LIMIT);
+  });
+
+  it("routes a task to the DLQ once its retry budget is exhausted", () => {
+    assert.equal(shouldRouteToDlq(0, FPL_SYNC_RETRY_LIMIT), false);
+    assert.equal(shouldRouteToDlq(1, FPL_SYNC_RETRY_LIMIT), false);
+    assert.equal(shouldRouteToDlq(FPL_SYNC_RETRY_LIMIT - 1, FPL_SYNC_RETRY_LIMIT), false);
+    assert.equal(shouldRouteToDlq(FPL_SYNC_RETRY_LIMIT, FPL_SYNC_RETRY_LIMIT), true);
+  });
+
+  it("retries failing syncs with backoff and dead-letters permanently failed jobs", async () => {
+    // Mock the external FPL API to return 500s for the whole sync attempt.
+    mock.method(fplSyncService, "syncFixtures", async () => {
+      throw new Error("FPL API request failed: [500] Internal Server Error");
+    });
+
+    const task: FplSyncTask = { type: "fixtures" };
+    const deadLettered: FplSyncTask[] = [];
+    const sendToDlq = async (t: FplSyncTask) => {
+      deadLettered.push(t);
+    };
+
+    try {
+      // Non-terminal attempts retry (throw) without touching the DLQ.
+      for (let retryCount = 0; retryCount < FPL_SYNC_RETRY_LIMIT; retryCount++) {
+        await assert.rejects(
+          () => runFplSyncTaskWithRetry(task, retryCount, FPL_SYNC_RETRY_LIMIT, sendToDlq),
+          /500/
+        );
+      }
+      assert.deepEqual(deadLettered, []);
+
+      // The attempt at the retry limit is forwarded to the DLQ before failing.
+      await assert.rejects(
+        () => runFplSyncTaskWithRetry(task, FPL_SYNC_RETRY_LIMIT, FPL_SYNC_RETRY_LIMIT, sendToDlq),
+        /500/
+      );
+      assert.deepEqual(deadLettered, [task]);
+    } finally {
+      mock.restoreAll();
+    }
+  });
+
+  it("exposes the sync queue and DLQ in the queue health snapshot", async () => {
+    const health = await getQueueHealth();
+    assert.equal(health.sync.name, "fpl-sync");
+    assert.equal(health.sync.retryDelaySeconds, FPL_SYNC_RETRY_DELAY_SECONDS);
+    assert.equal(health.sync.backoffExponential, true);
+    assert.equal(health.sync.queued, null);
+    assert.equal(health.dlq.name, "fpl-sync-dlq");
+    assert.equal(health.dlq.queued, null);
   });
 });
