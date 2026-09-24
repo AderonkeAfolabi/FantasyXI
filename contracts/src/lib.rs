@@ -966,7 +966,7 @@ mod test {
     fn release_wasm() -> &'static [u8] {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/target/wasm32v1-none/release/fantasyxi_escrow.wasm"
+            "/target/wasm32-unknown-unknown/release/fantasyxi_escrow.wasm"
         ))
     }
 
