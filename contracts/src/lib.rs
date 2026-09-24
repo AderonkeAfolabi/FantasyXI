@@ -34,6 +34,7 @@ pub enum LeagueStatus {
 pub struct LeagueState {
     pub creator: Address,
     pub entry_fee: i128,
+    pub asset: Address,
     pub total_deposited: i128,
     pub participant_count: u32,
     pub status: LeagueStatus,
@@ -50,7 +51,6 @@ pub struct WinnerPayout {
 #[contracttype]
 pub enum DataKey {
     Admin,
-    UsdcToken,
     League(u64),
     Deposit(u64, Address),
 }
@@ -60,15 +60,14 @@ pub struct FantasyXIEscrow;
 
 #[contractimpl]
 impl FantasyXIEscrow {
-    /// Initializes the global escrow contract with an admin and USDC token address.
-    pub fn initialize(env: Env, admin: Address, usdc_token: Address) -> Result<(), EscrowError> {
+    /// Initializes the global escrow contract with an admin.
+    pub fn initialize(env: Env, admin: Address) -> Result<(), EscrowError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(EscrowError::AlreadyInitialized);
         }
         admin.require_auth();
 
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::UsdcToken, &usdc_token);
         Ok(())
     }
 
@@ -78,6 +77,7 @@ impl FantasyXIEscrow {
         creator: Address,
         league_id: u64,
         entry_fee: i128,
+        asset: Address,
     ) -> Result<(), EscrowError> {
         creator.require_auth();
 
@@ -90,9 +90,13 @@ impl FantasyXIEscrow {
             return Err(EscrowError::LeagueAlreadyExists);
         }
 
+        // Validate that the token is a valid contract by executing a dummy read
+        let _ = token::Client::new(&env, &asset).balance(&env.current_contract_address());
+
         let state = LeagueState {
             creator: creator.clone(),
             entry_fee,
+            asset,
             total_deposited: 0,
             participant_count: 0,
             status: LeagueStatus::Upcoming,
@@ -128,15 +132,9 @@ impl FantasyXIEscrow {
             return Err(EscrowError::AlreadyDeposited);
         }
 
-        // If entry fee > 0, transfer USDC tokens into this contract
+        // If entry fee > 0, transfer tokens into this contract
         if league.entry_fee > 0 {
-            let token_addr: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::UsdcToken)
-                .ok_or(EscrowError::NotInitialized)?;
-
-            let token_client = token::Client::new(&env, &token_addr);
+            let token_client = token::Client::new(&env, &league.asset);
             token_client.transfer(
                 &participant,
                 &env.current_contract_address(),
@@ -206,12 +204,7 @@ impl FantasyXIEscrow {
             return Err(EscrowError::PayoutExceedsDeposits);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::UsdcToken)
-            .ok_or(EscrowError::NotInitialized)?;
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &league.asset);
 
         // 1. Transfer platform fee
         if platform_fee > 0 {
@@ -274,12 +267,7 @@ impl FantasyXIEscrow {
             return Err(EscrowError::AlreadySettled);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::UsdcToken)
-            .ok_or(EscrowError::NotInitialized)?;
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &league.asset);
 
         for participant in participants.iter() {
             let dep_key = DataKey::Deposit(league_id, participant.clone());
@@ -334,20 +322,21 @@ mod test {
         let contract_id = env.register(FantasyXIEscrow, ());
         let client = FantasyXIEscrowClient::new(&env, &contract_id);
 
-        client.initialize(&admin, &token_contract.address());
+        client.initialize(&admin);
 
         (env, admin, token_contract.address(), client)
     }
 
     #[test]
     fn test_initialize_and_create_league() {
-        let (env, _admin, _token, client) = setup_test();
+        let (env, _admin, token, client) = setup_test();
         let creator = Address::generate(&env);
 
-        client.create_league(&creator, &101, &50_000_000); // 5 USDC (with 7 decimals)
+        client.create_league(&creator, &101, &50_000_000, &token); // 5 USDC (with 7 decimals)
 
         let league = client.get_league(&101).expect("League should exist");
         assert_eq!(league.entry_fee, 50_000_000);
+        assert_eq!(league.asset, token);
         assert_eq!(league.total_deposited, 0);
         assert_eq!(league.participant_count, 0);
         assert_eq!(league.status, LeagueStatus::Upcoming);
@@ -367,7 +356,7 @@ mod test {
         token_admin_client.mint(&user2, &50_000_000);
 
         // Create league
-        client.create_league(&admin, &200, &50_000_000);
+        client.create_league(&admin, &200, &50_000_000, &token_addr);
 
         // Deposits
         client.deposit(&user1, &200);
@@ -418,7 +407,7 @@ mod test {
         let user1 = Address::generate(&env);
         token_admin_client.mint(&user1, &100_000_000);
 
-        client.create_league(&admin, &201, &50_000_000);
+        client.create_league(&admin, &201, &50_000_000, &token_addr);
         client.deposit(&user1, &201);
 
         // Second deposit must fail
@@ -436,7 +425,7 @@ mod test {
         let treasury = Address::generate(&env);
 
         token_admin_client.mint(&user1, &50_000_000);
-        client.create_league(&admin, &202, &50_000_000);
+        client.create_league(&admin, &202, &50_000_000, &token_addr);
         client.deposit(&user1, &202);
 
         let winners = vec![
@@ -461,7 +450,7 @@ mod test {
         let treasury = Address::generate(&env);
 
         token_admin_client.mint(&user1, &50_000_000);
-        client.create_league(&admin, &203, &50_000_000);
+        client.create_league(&admin, &203, &50_000_000, &token_addr);
         client.deposit(&user1, &203); // Total deposited = 50_000_000
 
         // Attempt payout of 100_000_000
@@ -485,7 +474,7 @@ mod test {
         let user1 = Address::generate(&env);
         token_admin_client.mint(&user1, &50_000_000);
 
-        client.create_league(&admin, &300, &50_000_000);
+        client.create_league(&admin, &300, &50_000_000, &token_addr);
         client.deposit(&user1, &300);
 
         let token_client = token::Client::new(&env, &token_addr);
@@ -513,5 +502,81 @@ mod test {
         ];
         let result = client.try_settle(&admin, &300, &winners, &admin, &0);
         assert_eq!(result, Err(Ok(EscrowError::AlreadySettled)));
+    }
+
+    #[test]
+    fn test_multiple_assets_parallel_leagues() {
+        let (env, admin, usdc_addr, client) = setup_test();
+        let usdc_admin_client = token::StellarAssetClient::new(&env, &usdc_addr);
+        let usdc_client = token::Client::new(&env, &usdc_addr);
+
+        let xlm_admin = Address::generate(&env);
+        let xlm_addr = env.register_stellar_asset_contract_v2(xlm_admin).address();
+        let xlm_admin_client = token::StellarAssetClient::new(&env, &xlm_addr);
+        let xlm_client = token::Client::new(&env, &xlm_addr);
+
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        usdc_admin_client.mint(&user1, &100_000_000);
+        xlm_admin_client.mint(&user2, &200_000_000);
+
+        client.create_league(&admin, &400, &50_000_000, &usdc_addr);
+        client.create_league(&admin, &401, &150_000_000, &xlm_addr);
+
+        client.deposit(&user1, &400);
+        client.deposit(&user2, &401);
+
+        assert_eq!(usdc_client.balance(&user1), 50_000_000);
+        assert_eq!(xlm_client.balance(&user2), 50_000_000);
+
+        let usdc_winners = vec![
+            &env,
+            WinnerPayout {
+                winner: user1.clone(),
+                amount: 45_000_000,
+            },
+        ];
+        client.settle(&admin, &400, &usdc_winners, &treasury, &5_000_000);
+
+        let xlm_winners = vec![
+            &env,
+            WinnerPayout {
+                winner: user2.clone(),
+                amount: 140_000_000,
+            },
+        ];
+        client.settle(&admin, &401, &xlm_winners, &treasury, &10_000_000);
+
+        assert_eq!(usdc_client.balance(&user1), 95_000_000);
+        assert_eq!(usdc_client.balance(&treasury), 5_000_000);
+        assert_eq!(xlm_client.balance(&user2), 190_000_000);
+        assert_eq!(xlm_client.balance(&treasury), 10_000_000);
+    }
+
+    #[test]
+    fn test_zero_fee_league() {
+        let (env, admin, token_addr, client) = setup_test();
+        let creator = Address::generate(&env);
+        let user = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        client.create_league(&creator, &500, &0, &token_addr);
+        client.deposit(&user, &500);
+
+        let league = client.get_league(&500).unwrap();
+        assert_eq!(league.total_deposited, 0);
+
+        let winners = vec![
+            &env,
+            WinnerPayout {
+                winner: user.clone(),
+                amount: 0,
+            },
+        ];
+        client.settle(&admin, &500, &winners, &treasury, &0);
+        let settled_league = client.get_league(&500).unwrap();
+        assert_eq!(settled_league.status, LeagueStatus::Settled);
     }
 }
