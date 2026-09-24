@@ -26,22 +26,32 @@ jobs:
           toolchain: stable
           targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo registry and target directory
+      - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            contracts/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('contracts/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Install binaryen (wasm-opt)
+        run: sudo apt-get install -y binaryen
 
       - name: Run cargo build
         run: |
           cargo build --verbose
-          cargo build --target wasm32-unknown-unknown --release --verbose
+          RUSTFLAGS="-C target-feature=-reference-types" cargo build --target wasm32-unknown-unknown --release --verbose
+
+      - name: Post-process wasm to remove reference-types encoding
+        run: |
+          WASM=target/wasm32-unknown-unknown/release/fantasyxi_escrow.wasm
+          wasm-opt -O --strip-producers \
+            --enable-bulk-memory \
+            --enable-reference-types --disable-reference-types \
+            "$WASM" -o "$WASM"
 
       - name: Run cargo test
         run: cargo test --verbose
