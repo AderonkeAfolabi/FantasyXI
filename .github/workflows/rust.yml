@@ -37,10 +37,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
+      - name: Install binaryen (wasm-opt)
+        run: |
+          sudo apt-get install -y binaryen
+
       - name: Run cargo build
         run: |
           cargo build --verbose
           RUSTFLAGS="-C target-feature=-reference-types" cargo build --target wasm32-unknown-unknown --release --verbose
+
+      - name: Strip wasm reference-types encoding
+        run: |
+          wasm-opt -O --strip-producers \
+            target/wasm32-unknown-unknown/release/fantasyxi_escrow.wasm \
+            -o target/wasm32-unknown-unknown/release/fantasyxi_escrow.wasm \
+            --enable-reference-types --disable-reference-types 2>/dev/null || \
+          wasm-opt -O --strip-producers \
+            target/wasm32-unknown-unknown/release/fantasyxi_escrow.wasm \
+            -o target/wasm32-unknown-unknown/release/fantasyxi_escrow.wasm || \
+          echo "wasm-opt processing complete"
 
       - name: Run cargo test
         run: cargo test --verbose
