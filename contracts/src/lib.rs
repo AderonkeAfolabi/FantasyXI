@@ -19,6 +19,7 @@ pub enum EscrowError {
     NotAuthorized = 10,
     FeeExceedsMaxCap = 11,
     InvalidPrizeDistribution = 12,
+    NoClaimablePrize = 13,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -55,6 +56,7 @@ pub enum DataKey {
     Admin,
     League(u64),
     Deposit(u64, Address),
+    ClaimablePrize(u64, Address),
 }
 
 #[contract]
@@ -249,14 +251,11 @@ impl FantasyXIEscrow {
             );
         }
 
-        // 2. Transfer winner prizes
+        // 2. Write winner prizes to claimable storage
         for winner in winners.iter() {
             if winner.amount > 0 {
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &winner.winner,
-                    &winner.amount,
-                );
+                let claim_key = DataKey::ClaimablePrize(league_id, winner.winner.clone());
+                env.storage().persistent().set(&claim_key, &winner.amount);
             }
         }
 
@@ -338,6 +337,37 @@ impl FantasyXIEscrow {
             .persistent()
             .get(&DataKey::Deposit(league_id, participant))
             .unwrap_or(0)
+    }
+
+    /// Winner claims their prize for a settled league.
+    pub fn claim_prize(env: Env, winner: Address, league_id: u64) -> Result<(), EscrowError> {
+        winner.require_auth();
+
+        let claim_key = DataKey::ClaimablePrize(league_id, winner.clone());
+        let amount: i128 = env
+            .storage()
+            .persistent()
+            .get(&claim_key)
+            .ok_or(EscrowError::NoClaimablePrize)?;
+
+        let league_key = DataKey::League(league_id);
+        let league: LeagueState = env
+            .storage()
+            .persistent()
+            .get(&league_key)
+            .ok_or(EscrowError::LeagueNotFound)?;
+
+        let token_client = token::Client::new(&env, &league.asset);
+        token_client.transfer(&env.current_contract_address(), &winner, &amount);
+
+        env.storage().persistent().remove(&claim_key);
+
+        env.events().publish(
+            (symbol_short!("claimed"), league_id),
+            (winner, amount),
+        );
+
+        Ok(())
     }
 }
 
@@ -421,6 +451,9 @@ mod test {
 
         let settled_league = client.get_league(&200).unwrap();
         assert_eq!(settled_league.status, LeagueStatus::Settled);
+
+        client.claim_prize(&user1, &200);
+        client.claim_prize(&user2, &200);
 
         // Verify balances
         let token_client = token::Client::new(&env, &token_addr);
@@ -594,6 +627,9 @@ mod test {
         ];
         client.settle(&admin, &401, &xlm_winners, &treasury, &7_500_000);
 
+        client.claim_prize(&user1, &400);
+        client.claim_prize(&user2, &401);
+
         assert_eq!(usdc_client.balance(&user1), 97_500_000);
         assert_eq!(usdc_client.balance(&treasury), 2_500_000);
         assert_eq!(xlm_client.balance(&user2), 192_500_000);
@@ -654,9 +690,49 @@ mod test {
 
         client.settle(&admin, &600, &winners, &treasury, &platform_fee);
 
+        client.claim_prize(&u1, &600);
+        client.claim_prize(&u2, &600);
+        client.claim_prize(&u3, &600);
+
         let token_client = token::Client::new(&env, &token_addr);
         assert_eq!(token_client.balance(&u1), 5_700_006);
         assert_eq!(token_client.balance(&u2), 2_850_003);
         assert_eq!(token_client.balance(&u3), 950_002);
+    }
+
+    #[test]
+    fn test_independent_claims() {
+        let (env, admin, token_addr, client) = setup_test();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_addr);
+
+        let u1 = Address::generate(&env);
+        let u2 = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        token_admin_client.mint(&u1, &50_000_000);
+        token_admin_client.mint(&u2, &50_000_000);
+
+        client.create_league(&admin, &700, &50_000_000, &token_addr);
+        client.deposit(&u1, &700);
+        client.deposit(&u2, &700);
+
+        let winners = vec![
+            &env,
+            WinnerPayout { winner: u1.clone(), amount: 66_500_000 },
+            WinnerPayout { winner: u2.clone(), amount: 28_500_000 },
+        ];
+
+        client.settle(&admin, &700, &winners, &treasury, &5_000_000);
+
+        // U2 claims before U1
+        client.claim_prize(&u2, &700);
+
+        let token_client = token::Client::new(&env, &token_addr);
+        assert_eq!(token_client.balance(&u1), 0); // Not claimed yet
+        assert_eq!(token_client.balance(&u2), 28_500_000);
+
+        // U1 claims later
+        client.claim_prize(&u1, &700);
+        assert_eq!(token_client.balance(&u1), 66_500_000);
     }
 }
