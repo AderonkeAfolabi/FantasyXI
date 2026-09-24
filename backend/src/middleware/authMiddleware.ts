@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { verifyAccessToken } from "../config/jwt.js";
-import { AuthUser } from "../types/index.js";
+import { AuthUser, UserRole } from "../types/index.js";
 
 /**
  * Global declaration merging to extend Express Request with authenticated user.
@@ -63,6 +63,7 @@ export function requireAuth(
       id: payload.userId,
       email: payload.email || "",
       username: payload.username || "",
+      role: asUserRole(payload.role),
     };
 
     next();
@@ -82,6 +83,65 @@ export function requireAuth(
     return;
   }
 }
+
+/**
+ * Coerces an arbitrary JWT role string into a known UserRole.
+ * Unknown / missing roles fall back to USER for forward compatibility.
+ */
+function asUserRole(role: unknown): UserRole {
+  switch (role) {
+    case UserRole.ADMIN:
+      return UserRole.ADMIN;
+    case UserRole.MODERATOR:
+      return UserRole.MODERATOR;
+    default:
+      return UserRole.USER;
+  }
+}
+
+/**
+ * Role-Based Access Control (RBAC) middleware factory.
+ *
+ * Returns a middleware that requires the authenticated user to hold at least
+ * one of the supplied roles. Rejects insufficiently privileged requests with
+ * HTTP 403. Must be mounted after `requireAuth`.
+ */
+export function requireRole(...allowedRoles: UserRole[]): (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => void {
+  const permitted = new Set(allowedRoles);
+
+  return function roleGuard(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): void {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+      return;
+    }
+
+    if (!permitted.has(req.user.role)) {
+      res.status(403).json({
+        success: false,
+        message: "You do not have permission to perform this action.",
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
+/**
+ * Convenience guard restricting access to ADMIN / MODERATOR roles.
+ */
+export const requireStaff = requireRole(UserRole.ADMIN, UserRole.MODERATOR);
 
 /**
  * Optional authentication middleware.
@@ -107,6 +167,7 @@ export function optionalAuth(
           id: payload.userId,
           email: payload.email || "",
           username: payload.username || "",
+          role: asUserRole(payload.role),
         };
       }
     } catch {

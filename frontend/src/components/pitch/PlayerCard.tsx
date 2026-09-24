@@ -4,6 +4,7 @@ import React from "react";
 import { Player, Position } from "@/types";
 import { PositionBadge } from "@/components/ui/Badge";
 import { IconFootball, IconSwap } from "@/components/ui/Icons";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 
 import { useTeamStore } from "@/store/teamStore";
 
@@ -15,6 +16,7 @@ export interface PlayerCardProps {
   isViceCaptain?: boolean;
   benchIndex?: number; // 0 for sub keeper, 1, 2, 3 for outfield
   isSwapCandidate?: boolean;
+  isOverlay?: boolean;
   onQuickAction?: (action: "captain" | "vice" | "swap" | "transfer") => void;
 }
 
@@ -26,36 +28,62 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   isViceCaptain = false,
   benchIndex,
   isSwapCandidate = false,
+  isOverlay = false,
 }) => {
   const isSelectedForSwap = useTeamStore(
     (state) => state.selectedPlayerId !== null && player?.id === state.selectedPlayerId
   );
   const handlePlayerClick = useTeamStore((state) => state.handlePlayerClick);
   const onClick = () => handlePlayerClick(player || null, positionSlot);
+
+  // Drag and Drop integration
+  const dropId = player?.id?.toString() || `empty-${positionSlot}-${benchIndex ?? 'starter'}`;
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDraggableRef,
+    isDragging,
+  } = useDraggable({
+    id: player?.id?.toString() || "no-drag",
+    disabled: !player, // cannot drag an empty slot
+  });
+
+  const { isOver, setNodeRef: setDroppableRef } = useDroppable({
+    id: dropId,
+  });
+
+  // Combine refs (since the card acts as both draggable item and droppable slot target)
+  const setNodeRef = (node: HTMLElement | null) => {
+    setDraggableRef(node);
+    setDroppableRef(node);
+  };
+
   // Empty slot (when building or drafting)
   if (!player) {
     return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={`group relative flex flex-col items-center justify-center p-2 rounded-xl transition-all duration-200 w-20 sm:w-24 ${
-          isSwapCandidate
-            ? "bg-emerald-500/20 border-2 border-dashed border-emerald-400 animate-pulse"
-            : "bg-slate-950/40 border border-dashed border-slate-700 hover:border-emerald-400 hover:bg-slate-900/60"
-        }`}
-      >
-        <div className="w-10 h-10 rounded-lg bg-slate-800/80 group-hover:bg-emerald-500/20 text-slate-400 group-hover:text-emerald-400 flex items-center justify-center mb-1.5 transition-colors">
-          <span className="text-lg font-bold">+</span>
-        </div>
-        <PositionBadge position={positionSlot} size="sm" />
-        <span className="text-[10px] text-slate-500 mt-1 uppercase font-semibold">
-          {benchIndex !== undefined
-            ? benchIndex === 0
-              ? "Sub GK"
-              : `Sub ${benchIndex}`
-            : "Add"}
-        </span>
-      </button>
+      <div ref={setNodeRef} className="relative flex flex-col items-center">
+        <button
+          type="button"
+          onClick={onClick}
+          className={`group relative flex flex-col items-center justify-center p-2 rounded-xl transition-all duration-200 w-20 sm:w-24 ${
+            isSwapCandidate || isOver
+              ? "bg-emerald-500/20 border-2 border-dashed border-emerald-400 animate-pulse"
+              : "bg-slate-950/40 border border-dashed border-slate-700 hover:border-emerald-400 hover:bg-slate-900/60"
+          }`}
+        >
+          <div className="w-10 h-10 rounded-lg bg-slate-800/80 group-hover:bg-emerald-500/20 text-slate-400 group-hover:text-emerald-400 flex items-center justify-center mb-1.5 transition-colors">
+            <span className="text-lg font-bold">+</span>
+          </div>
+          <PositionBadge position={positionSlot} size="sm" />
+          <span className="text-[10px] text-slate-500 mt-1 uppercase font-semibold">
+            {benchIndex !== undefined
+              ? benchIndex === 0
+                ? "Sub GK"
+                : `Sub ${benchIndex}`
+              : "Add"}
+          </span>
+        </button>
+      </div>
     );
   }
 
@@ -78,16 +106,19 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   const jerseyStyle = getJerseyStyle(player.position);
 
   return (
-    <div className="relative flex flex-col items-center">
+    <div ref={setNodeRef} className={`relative flex flex-col items-center ${isDragging && !isOverlay ? 'opacity-30' : ''}`}>
       <button
         type="button"
         onClick={onClick}
+        {...(!isOverlay ? listeners : {})}
+        {...(!isOverlay ? attributes : {})}
+        style={!isOverlay ? { touchAction: 'none' } : undefined}
         className={`group relative flex flex-col items-center focus:outline-none transition-all duration-200 ${
           isSelectedForSwap
             ? "scale-105 ring-4 ring-emerald-400 rounded-xl bg-emerald-950/60 p-1"
-            : isSwapCandidate
+            : isSwapCandidate || isOver
             ? "scale-105 ring-2 ring-amber-400 rounded-xl bg-amber-950/40 p-1 animate-pulse"
-            : "hover:scale-105"
+            : "hover:scale-105 cursor-grab active:cursor-grabbing"
         }`}
       >
         {/* Captain / Vice Captain Badge */}

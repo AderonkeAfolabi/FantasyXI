@@ -21,6 +21,7 @@ import {
   TransactionType,
   TransactionStatus,
   ChipType,
+  UserRole,
 } from "@prisma/client";
 
 export {
@@ -32,6 +33,7 @@ export {
   TransactionType,
   TransactionStatus,
   ChipType,
+  UserRole,
 };
 
 
@@ -84,6 +86,7 @@ export interface AuthUser {
   email: string;
   username: string;
   name?: string | null;
+  role: UserRole;
 }
 
 /** Safe user representation returned across public and auth endpoints */
@@ -92,6 +95,7 @@ export interface SafeUser {
   email: string;
   username: string;
   name?: string | null;
+  role: UserRole;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -101,6 +105,7 @@ export interface JwtPayload {
   userId: string;
   email: string;
   username: string;
+  role?: UserRole;
 }
 
 /** POST /api/v1/auth/register input */

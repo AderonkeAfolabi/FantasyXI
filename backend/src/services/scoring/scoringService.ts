@@ -50,6 +50,155 @@ export interface GameweekCalculationResult {
   lineupDetails: PlayerScoreDetail[];
 }
 
+/** Live per-position counts of the current starting XI. */
+export interface FormationCounts {
+  gkp: number;
+  def: number;
+  mid: number;
+  fwd: number;
+}
+
+/**
+ * Dynamic Auto-Substitution Engine.
+ *
+ * Applies FPL bench rules while guaranteeing that every individual swap keeps
+ * the resulting formation valid (>= 1 GKP, >= 3 DEF, >= 2 MID, >= 1 FWD).
+ *
+ * Rules enforced:
+ * - A non-playing starter (0 minutes) may be replaced.
+ * - The bench is evaluated in bench priority order (positionOrder ascending).
+ * - A bench player is skipped when bringing them on would invalidate the
+ *   formation, and the algorithm moves to the next eligible bench player.
+ * - A goalkeeper can only be replaced by the bench goalkeeper.
+ * - A bench player who played 0 minutes can never be subbed in.
+ * - A bench player who was already subbed in is no longer eligible.
+ * - Position counts are recomputed live so chained swaps stay formation-safe.
+ */
+export class AutoSubstitutionEngine {
+  public static countFormation(players: PlayerScoreDetail[]): FormationCounts {
+    const counts: FormationCounts = { gkp: 0, def: 0, mid: 0, fwd: 0 };
+    for (const p of players) {
+      switch (p.position) {
+        case Position.GKP:
+          counts.gkp++;
+          break;
+        case Position.DEF:
+          counts.def++;
+          break;
+        case Position.MID:
+          counts.mid++;
+          break;
+        case Position.FWD:
+          counts.fwd++;
+          break;
+      }
+    }
+    return counts;
+  }
+
+  /**
+   * Returns true when replacing `starter` with `candidate` keeps the formation
+   * within the platform's minimum starting requirements.
+   */
+  public static swapKeepsFormationValid(
+    starter: PlayerScoreDetail,
+    candidate: PlayerScoreDetail,
+    counts: FormationCounts
+  ): boolean {
+    const next: FormationCounts = {
+      gkp:
+        counts.gkp -
+        (starter.position === Position.GKP ? 1 : 0) +
+        (candidate.position === Position.GKP ? 1 : 0),
+      def:
+        counts.def -
+        (starter.position === Position.DEF ? 1 : 0) +
+        (candidate.position === Position.DEF ? 1 : 0),
+      mid:
+        counts.mid -
+        (starter.position === Position.MID ? 1 : 0) +
+        (candidate.position === Position.MID ? 1 : 0),
+      fwd:
+        counts.fwd -
+        (starter.position === Position.FWD ? 1 : 0) +
+        (candidate.position === Position.FWD ? 1 : 0),
+    };
+
+    return (
+      next.gkp >= SQUAD_RULES.MIN_STARTERS.GKP &&
+      next.def >= SQUAD_RULES.MIN_STARTERS.DEF &&
+      next.mid >= SQUAD_RULES.MIN_STARTERS.MID &&
+      next.fwd >= SQUAD_RULES.MIN_STARTERS.FWD
+    );
+  }
+
+  /**
+   * Resolves automatic bench substitutions for non-playing starters.
+   *
+   * Mutates the `subbedIn` / `subbedOut` flags on the supplied details and
+   * returns the final starting XI (original starters with replacements).
+   */
+  public static resolveAutoSubstitutions(
+    starterDetails: PlayerScoreDetail[],
+    benchDetails: PlayerScoreDetail[]
+  ): PlayerScoreDetail[] {
+    const currentStarters = [...starterDetails];
+
+    for (let i = 0; i < currentStarters.length; i++) {
+      const starter = currentStarters[i];
+      if (starter.minutesPlayed > 0) {
+        continue;
+      }
+
+      const counts = AutoSubstitutionEngine.countFormation(currentStarters);
+
+      // Goalkeepers can ONLY be replaced by the bench goalkeeper
+      if (starter.position === Position.GKP) {
+        const benchGkp = benchDetails.find(
+          (b) =>
+            b.position === Position.GKP &&
+            !b.subbedIn &&
+            b.minutesPlayed > 0
+        );
+        if (benchGkp) {
+          starter.subbedOut = true;
+          benchGkp.subbedIn = true;
+          currentStarters[i] = benchGkp;
+        }
+        continue;
+      }
+
+      // Outfield player (DEF, MID, FWD): walk the bench in priority order and
+      // pick the first candidate whose swap keeps the formation valid.
+      for (const candidate of benchDetails) {
+        if (
+          candidate.position === Position.GKP ||
+          candidate.subbedIn ||
+          candidate.minutesPlayed === 0
+        ) {
+          continue;
+        }
+
+        if (
+          AutoSubstitutionEngine.swapKeepsFormationValid(
+            starter,
+            candidate,
+            counts
+          )
+        ) {
+          // Valid substitution found — apply and move on.
+          starter.subbedOut = true;
+          candidate.subbedIn = true;
+          currentStarters[i] = candidate;
+          break;
+        }
+      }
+    }
+
+    return currentStarters;
+  }
+}
+
 export class ScoringService {
   /**
    * Pure function to calculate gameweek score for a squad given players and their stats.
@@ -110,57 +259,13 @@ export class ScoringService {
 
     // 2. Perform auto-substitutions for starters who played 0 minutes
     // (skipped with Bench Boost, where every bench player already scores)
-    // Current formation counts in starting XI
-    const currentStarters = [...starterDetails];
+    let currentStarters: PlayerScoreDetail[] = [...starterDetails];
 
-    for (let i = 0; i < currentStarters.length && !isBenchBoost; i++) {
-      const starter = currentStarters[i];
-      if (starter.minutesPlayed > 0) {
-        continue;
-      }
-
-      // Starter didn't play (0 minutes) -> try to find a valid bench sub
-      if (starter.position === Position.GKP) {
-        // Goalkeepers can ONLY be replaced by the bench goalkeeper
-        const benchGkp = benchDetails.find(
-          (b) => b.position === Position.GKP && !b.subbedIn && b.minutesPlayed > 0
-        );
-        if (benchGkp) {
-          starter.subbedOut = true;
-          benchGkp.subbedIn = true;
-          currentStarters[i] = benchGkp;
-        }
-      } else {
-        // Outfield player (DEF, MID, FWD) -> check bench in order
-        // Must ensure that removing starter and adding candidate leaves valid formation:
-        // >= 3 DEF, >= 2 MID, >= 1 FWD
-        const currentDef = currentStarters.filter((s) => s.position === Position.DEF).length;
-        const currentMid = currentStarters.filter((s) => s.position === Position.MID).length;
-        const currentFwd = currentStarters.filter((s) => s.position === Position.FWD).length;
-
-        for (const candidate of benchDetails) {
-          if (candidate.position === Position.GKP || candidate.subbedIn || candidate.minutesPlayed === 0) {
-            continue;
-          }
-
-          // Check hypothetical formation if candidate replaces starter
-          const newDef = currentDef - (starter.position === Position.DEF ? 1 : 0) + (candidate.position === Position.DEF ? 1 : 0);
-          const newMid = currentMid - (starter.position === Position.MID ? 1 : 0) + (candidate.position === Position.MID ? 1 : 0);
-          const newFwd = currentFwd - (starter.position === Position.FWD ? 1 : 0) + (candidate.position === Position.FWD ? 1 : 0);
-
-          if (
-            newDef >= SQUAD_RULES.MIN_STARTERS.DEF &&
-            newMid >= SQUAD_RULES.MIN_STARTERS.MID &&
-            newFwd >= SQUAD_RULES.MIN_STARTERS.FWD
-          ) {
-            // Valid substitution found!
-            starter.subbedOut = true;
-            candidate.subbedIn = true;
-            currentStarters[i] = candidate;
-            break;
-          }
-        }
-      }
+    if (!isBenchBoost) {
+      currentStarters = AutoSubstitutionEngine.resolveAutoSubstitutions(
+        starterDetails,
+        benchDetails
+      );
     }
 
     // 3. Determine Captain multiplier (2x, or 3x with Triple Captain)
