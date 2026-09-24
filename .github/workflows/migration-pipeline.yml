@@ -28,6 +28,8 @@ jobs:
           npm ci
 
       - name: Generate Prisma Client
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/fantasyxi?schema=public"
         run: |
           cd backend
           npx prisma generate
