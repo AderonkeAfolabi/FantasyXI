@@ -325,6 +325,7 @@ export interface SettlementPlan {
   netPrizePool: number;
   winners: SettlementWinner[];
   canSettle: boolean;
+  proofHash?: string;
   unsettledReason?: string;
 }
 
@@ -346,7 +347,6 @@ export interface ReconciliationReport {
     confirmedAt: Date | null;
   }>;
 }
-
 
 
 
