@@ -27,7 +27,7 @@ export interface PaymentModalProps {
   leagueName: string;
   squadId: string;
   entryFee: number;
-  onPaymentSuccess?: () => void;
+  onPaymentSuccess?: (deposit: { txHash: string; ledgerSeq?: number }) => void;
 }
 
 interface PaymentRequirementData {
@@ -188,7 +188,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       if (verifyRes?.success) {
         setStep("success");
         setTimeout(() => {
-          onPaymentSuccess?.();
+          onPaymentSuccess?.({ txHash, ledgerSeq: depositResult.ledgerSeq });
           onClose();
         }, 2200);
       } else {
@@ -249,7 +249,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         setStep("success");
         setConfirmedTxHash(cleanHash);
         setTimeout(() => {
-          onPaymentSuccess?.();
+          onPaymentSuccess?.({ txHash: cleanHash });
           onClose();
         }, 2000);
       } else {

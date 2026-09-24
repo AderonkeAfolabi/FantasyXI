@@ -15,6 +15,7 @@ import {
 import { StandingsTable } from "@/components/leagues/StandingsTable";
 import { PrizeCalculator } from "@/components/leagues/PrizeCalculator";
 import { PaymentModal } from "@/components/leagues/PaymentModal";
+import { getOnChainLeague, OnChainLeagueState } from "@/lib/stellar/sorobanAudit";
 import { LiveMatchdayBar } from "@/components/live/LiveMatchdayBar";
 import { LiveSquadModal } from "@/components/live/LiveSquadModal";
 import { useLiveLeague } from "@/components/live/useLiveLeague";
@@ -53,6 +54,21 @@ export default function LeagueDetailPage({
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
   const [liveSquadUserId, setLiveSquadUserId] = useState<string | null>(null);
+  const [onChainLeague, setOnChainLeague] = useState<OnChainLeagueState | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [depositEvidence, setDepositEvidence] = useState<{
+    txHash: string;
+    ledgerSeq?: number;
+  } | null>(null);
+
+  const escrowContractId =
+    process.env.NEXT_PUBLIC_STELLAR_ESCROW_CONTRACT_ID ||
+    "CB4KIK42P32SZHKG4JBDCJUV4A4KGCDN6RHOOTIFSBGZHS2IF653VOEA";
+  const usdcAssetContract =
+    process.env.NEXT_PUBLIC_STELLAR_USDC_TOKEN_CONTRACT_ID ||
+    process.env.NEXT_PUBLIC_STELLAR_USDC_ISSUER ||
+    "";
+  const stellarExpertBase = "https://stellar.expert/explorer/testnet";
 
   // Live matchday feed (SSE) while the competition is running
   const { snapshot, rankChanges, freshEventKeys, connection } = useLiveLeague(
@@ -105,6 +121,26 @@ export default function LeagueDetailPage({
   useEffect(() => {
     loadLeagueData();
   }, [leagueId, isAuthenticated]);
+
+  useEffect(() => {
+    if (!league || league.entryFee <= 0) return;
+
+    let cancelled = false;
+    getOnChainLeague(leagueId, { contractId: escrowContractId })
+      .then((state) => {
+        if (!cancelled) setOnChainLeague(state);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setOnChainLeague(null);
+          setAuditError(error instanceof Error ? error.message : "RPC unavailable");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [league, leagueId, escrowContractId]);
 
   const copyInviteCode = () => {
     if (league?.inviteCode) {
@@ -432,6 +468,55 @@ export default function LeagueDetailPage({
         <div className="space-y-6">
           <PrizeCalculator entryFee={league.entryFee} participants={league.currentMembers || league.maxMembers} />
 
+          {league.entryFee > 0 && (
+            <div className="bg-pitch-surface border border-pitch-border rounded-xl p-5 shadow-md space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-white uppercase tracking-wider text-[11px] flex items-center gap-2">
+                    <IconShield className="w-4 h-4 text-emerald-400" />
+                    On-chain escrow audit
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-1">Soroban RPC · get_league</p>
+                </div>
+                <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded border ${
+                  onChainLeague &&
+                  onChainLeague.totalDeposited >= league.entryFee * league.currentMembers &&
+                  onChainLeague.participantCount >= league.currentMembers
+                    ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/30"
+                    : "text-amber-300 bg-amber-500/10 border-amber-500/30"
+                }`}>
+                  {onChainLeague ? `${Math.min(100, Math.round((onChainLeague.totalDeposited / Math.max(league.entryFee * league.currentMembers, 1)) * 100))}% solvent` : "Checking"}
+                </span>
+              </div>
+
+              {onChainLeague ? (
+                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-2.5">
+                    <div className="text-[10px] text-slate-500 uppercase font-sans">On-chain deposits</div>
+                    <div className="text-white font-bold mt-1">{onChainLeague.totalDeposited.toFixed(2)} USDC</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-2.5">
+                    <div className="text-[10px] text-slate-500 uppercase font-sans">Participants</div>
+                    <div className="text-white font-bold mt-1">{onChainLeague.participantCount} / {league.currentMembers}</div>
+                  </div>
+                  <div className="col-span-2 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Contract status</span>
+                    <span className="text-emerald-400 font-semibold uppercase">{onChainLeague.status}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">{auditError || "Reading escrow state..."}</p>
+              )}
+
+              <div className="flex flex-wrap gap-x-3 gap-y-2 text-[11px] font-semibold">
+                <a href={`${stellarExpertBase}/contract/${escrowContractId}`} target="_blank" rel="noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">Escrow contract</a>
+                {usdcAssetContract && <a href={`${stellarExpertBase}/contract/${usdcAssetContract}`} target="_blank" rel="noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">USDC asset</a>}
+                {depositEvidence && <a href={`${stellarExpertBase}/tx/${depositEvidence.txHash}`} target="_blank" rel="noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">Your deposit tx</a>}
+                {depositEvidence?.ledgerSeq && <a href={`${stellarExpertBase}/ledger/${depositEvidence.ledgerSeq}`} target="_blank" rel="noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">Ledger #{depositEvidence.ledgerSeq}</a>}
+              </div>
+            </div>
+          )}
+
           <div className="bg-pitch-surface border border-pitch-border rounded-xl p-5 shadow-md space-y-3 text-xs text-slate-400">
             <h3 className="font-bold text-white uppercase tracking-wider text-[11px] flex items-center gap-2">
               <IconShield className="w-4 h-4 text-emerald-400" />
@@ -461,7 +546,8 @@ export default function LeagueDetailPage({
           leagueName={league.name}
           squadId={myEntry.squadId}
           entryFee={league.entryFee}
-          onPaymentSuccess={() => {
+          onPaymentSuccess={(deposit) => {
+            setDepositEvidence(deposit);
             loadLeagueData();
           }}
         />
