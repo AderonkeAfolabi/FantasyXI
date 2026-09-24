@@ -3,6 +3,13 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Vec,
 };
 
+const DAY_IN_LEDGERS: u32 = 17280;
+const INSTANCE_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+const INSTANCE_LIFETIME_THRESHOLD: u32 = 14 * DAY_IN_LEDGERS;
+
+const PERSISTENT_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+const PERSISTENT_LIFETIME_THRESHOLD: u32 = 14 * DAY_IN_LEDGERS;
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -72,6 +79,9 @@ impl FantasyXIEscrow {
         admin.require_auth();
 
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
         Ok(())
     }
 
@@ -107,6 +117,13 @@ impl FantasyXIEscrow {
         };
 
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 
         env.events().publish(
             (symbol_short!("created"), league_id),
@@ -126,6 +143,10 @@ impl FantasyXIEscrow {
             .persistent()
             .get(&league_key)
             .ok_or(EscrowError::LeagueNotFound)?;
+
+        env.storage()
+            .persistent()
+            .extend_ttl(&league_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         if league.status != LeagueStatus::Upcoming {
             return Err(EscrowError::LeagueNotAcceptingDeposits);
@@ -149,10 +170,22 @@ impl FantasyXIEscrow {
         env.storage()
             .persistent()
             .set(&deposit_key, &league.entry_fee);
+            
+        env.storage()
+            .persistent()
+            .extend_ttl(&deposit_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         league.total_deposited += league.entry_fee;
         league.participant_count += 1;
         env.storage().persistent().set(&league_key, &league);
+
+        env.storage()
+            .persistent()
+            .extend_ttl(&league_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 
         env.events().publish(
             (symbol_short!("deposit"), league_id),
@@ -190,6 +223,10 @@ impl FantasyXIEscrow {
             .persistent()
             .get(&league_key)
             .ok_or(EscrowError::LeagueNotFound)?;
+
+        env.storage()
+            .persistent()
+            .extend_ttl(&league_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         if league.status == LeagueStatus::Settled || league.status == LeagueStatus::Cancelled {
             return Err(EscrowError::AlreadySettled);
@@ -256,11 +293,22 @@ impl FantasyXIEscrow {
             if winner.amount > 0 {
                 let claim_key = DataKey::ClaimablePrize(league_id, winner.winner.clone());
                 env.storage().persistent().set(&claim_key, &winner.amount);
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&claim_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
             }
         }
 
         league.status = LeagueStatus::Settled;
         env.storage().persistent().set(&league_key, &league);
+
+        env.storage()
+            .persistent()
+            .extend_ttl(&league_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 
         env.events().publish(
             (symbol_short!("settle"), league_id),
@@ -296,6 +344,10 @@ impl FantasyXIEscrow {
             .get(&league_key)
             .ok_or(EscrowError::LeagueNotFound)?;
 
+        env.storage()
+            .persistent()
+            .extend_ttl(&league_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
         if league.status == LeagueStatus::Settled {
             return Err(EscrowError::AlreadySettled);
         }
@@ -319,6 +371,14 @@ impl FantasyXIEscrow {
         league.status = LeagueStatus::Cancelled;
         env.storage().persistent().set(&league_key, &league);
 
+        env.storage()
+            .persistent()
+            .extend_ttl(&league_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+
         env.events().publish(
             (symbol_short!("refund"), league_id),
             participants.len(),
@@ -329,14 +389,25 @@ impl FantasyXIEscrow {
 
     /// Read queries
     pub fn get_league(env: Env, league_id: u64) -> Option<LeagueState> {
-        env.storage().persistent().get(&DataKey::League(league_id))
+        let key = DataKey::League(league_id);
+        let result = env.storage().persistent().get(&key);
+        if result.is_some() {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        }
+        result
     }
 
     pub fn get_deposit(env: Env, league_id: u64, participant: Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Deposit(league_id, participant))
-            .unwrap_or(0)
+        let key = DataKey::Deposit(league_id, participant);
+        let result = env.storage().persistent().get(&key);
+        if result.is_some() {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        }
+        result.unwrap_or(0)
     }
 
     /// Winner claims their prize for a settled league.
@@ -357,6 +428,10 @@ impl FantasyXIEscrow {
             .get(&league_key)
             .ok_or(EscrowError::LeagueNotFound)?;
 
+        env.storage()
+            .persistent()
+            .extend_ttl(&league_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
         let token_client = token::Client::new(&env, &league.asset);
         token_client.transfer(&env.current_contract_address(), &winner, &amount);
 
@@ -369,12 +444,32 @@ impl FantasyXIEscrow {
 
         Ok(())
     }
+
+    /// Admin / Public endpoint to manually extend TTL of a league and instance
+    pub fn extend_league_ttl(
+        env: Env,
+        league_id: u64,
+        threshold: u32,
+        extend_to: u32,
+    ) -> Result<(), EscrowError> {
+        let key = DataKey::League(league_id);
+        if !env.storage().persistent().has(&key) {
+            return Err(EscrowError::LeagueNotFound);
+        }
+
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, threshold, extend_to);
+
+        env.storage().instance().extend_ttl(threshold, extend_to);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, vec, Env};
+    use soroban_sdk::{testutils::{Address as _, Ledger}, vec, Env};
 
     fn setup_test() -> (Env, Address, Address, FantasyXIEscrowClient<'static>) {
         let env = Env::default();
@@ -676,7 +771,7 @@ mod test {
         client.deposit(&u1, &600);
 
         let platform_fee = 500_000;
-        let prize_pool = 10_000_011 - 500_000; // 9_500_011
+        let _prize_pool = 10_000_011 - 500_000; // 9_500_011
         // 60% = 5_700_006
         // 30% = 2_850_003
         // 10% (remainder) = 9_500_011 - 5_700_006 - 2_850_003 = 950_002
@@ -734,5 +829,29 @@ mod test {
         // U1 claims later
         client.claim_prize(&u1, &700);
         assert_eq!(token_client.balance(&u1), 66_500_000);
+    }
+
+    #[test]
+    fn test_ttl_extensions() {
+        let (env, admin, token_addr, client) = setup_test();
+        let creator = Address::generate(&env);
+
+        client.create_league(&creator, &800, &50_000_000, &token_addr);
+
+        // Advance ledger by some time (e.g., 50 ledgers)
+        env.ledger().with_mut(|li| {
+            li.sequence_number += 50;
+        });
+
+        // Use the explicit endpoint
+        let res = client.try_extend_league_ttl(&800, &100_000, &200_000);
+        assert_eq!(res, Ok(Ok(())));
+
+        // Call an operation that inherently extends TTL
+        let _league = client.get_league(&800).unwrap();
+
+        // Check if an unknown league errors correctly
+        let res_err = client.try_extend_league_ttl(&999, &100_000, &200_000);
+        assert_eq!(res_err, Err(Ok(EscrowError::LeagueNotFound)));
     }
 }
