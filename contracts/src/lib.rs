@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
+    Vec,
 };
 
 #[contracterror]
@@ -324,6 +325,33 @@ impl FantasyXIEscrow {
             participants.len(),
         );
 
+        Ok(())
+    }
+
+    /// Admin upgrades the executing contract to a new WASM executable.
+    ///
+    /// Uses Soroban's WASM hash substitution via `update_current_contract_wasm`:
+    /// `new_wasm_hash` must already be uploaded to the ledger beforehand. The
+    /// contract address and all existing state (admin, leagues, deposits,
+    /// prizes) are preserved across the upgrade.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(EscrowError::NotInitialized)?;
+
+        if admin != stored_admin {
+            return Err(EscrowError::NotAuthorized);
+        }
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
 
@@ -734,5 +762,78 @@ mod test {
         // U1 claims later
         client.claim_prize(&u1, &700);
         assert_eq!(token_client.balance(&u1), 66_500_000);
+    }
+
+    fn release_wasm() -> &'static [u8] {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/target/wasm32-unknown-unknown/release/fantasyxi_escrow.wasm"
+        ))
+    }
+
+    #[test]
+    fn test_upgrade_preserves_contract_state() {
+        let (env, admin, token_addr, client) = setup_test();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_addr);
+
+        let user1 = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        token_admin_client.mint(&user1, &100_000_000);
+        client.create_league(&admin, &800, &50_000_000, &token_addr);
+        client.deposit(&user1, &800);
+
+        // Pre-upgrade state sanity check
+        let before = client.get_league(&800).unwrap();
+        assert_eq!(before.participant_count, 1);
+        assert_eq!(before.total_deposited, 50_000_000);
+
+        // Upload a new WASM executable and perform the V1 -> V2 upgrade via
+        // WASM hash substitution. State must survive the upgrade.
+        let new_wasm_hash = env.deployer().upload_contract_wasm(release_wasm());
+        client.upgrade(&admin, &new_wasm_hash);
+
+        let after = client.get_league(&800).expect("League still accessible after upgrade");
+        assert_eq!(after.creator, before.creator);
+        assert_eq!(after.entry_fee, before.entry_fee);
+        assert_eq!(after.asset, token_addr);
+        assert_eq!(after.total_deposited, 50_000_000);
+        assert_eq!(after.participant_count, 1);
+        assert_eq!(after.status, LeagueStatus::Upcoming);
+
+        // Deposits are still visible after the upgrade
+        assert_eq!(client.get_deposit(&800, &user1), 50_000_000);
+
+        // Business logic keeps working on the upgraded executable
+        let winners = vec![
+            &env,
+            WinnerPayout {
+                winner: user1.clone(),
+                amount: 47_500_000,
+            },
+        ];
+        client.settle(&admin, &800, &winners, &treasury, &2_500_000);
+        client.claim_prize(&user1, &800);
+
+        let token_client = token::Client::new(&env, &token_addr);
+        assert_eq!(token_client.balance(&user1), 97_500_000);
+    }
+
+    #[test]
+    fn test_upgrade_rejected_for_non_admin() {
+        let (env, admin, token_addr, client) = setup_test();
+        let attacker = Address::generate(&env);
+
+        client.create_league(&admin, &801, &50_000_000, &token_addr);
+
+        let new_wasm_hash = env.deployer().upload_contract_wasm(release_wasm());
+
+        // A non-admin cannot trigger the upgrade
+        let result = client.try_upgrade(&attacker, &new_wasm_hash);
+        assert_eq!(result, Err(Ok(EscrowError::NotAuthorized)));
+
+        // A doomed upgrade must not disturb existing state
+        let league = client.get_league(&801).unwrap();
+        assert_eq!(league.participant_count, 0);
     }
 }
