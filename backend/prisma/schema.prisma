@@ -62,6 +62,16 @@ enum ChipType {
   WILDCARD
 }
 
+/// Role-Based Access Control role assigned to a user account.
+/// USER: regular platform consumer (default).
+/// MODERATOR: trusted operator able to run operational maintenance (e.g. syncs).
+/// ADMIN: full administrative access (platform settings, fee management).
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
 /// Types of USDC financial transactions
 enum TransactionType {
   ENTRY_FEE
@@ -92,6 +102,7 @@ model User {
   name          String?
   googleId      String?  @unique @map("google_id")
   countryCode   String?  @map("country_code")
+  role          UserRole @default(USER)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
