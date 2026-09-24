@@ -15,6 +15,7 @@ import {
   Keypair,
   scValToNative,
   xdr,
+  rpc,
 } from "@stellar/stellar-sdk";
 import {
   getHorizonServer,

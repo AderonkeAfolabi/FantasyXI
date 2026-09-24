@@ -95,23 +95,27 @@ enum TransactionStatus {
 /// A registered user on the platform.
 /// Laravel equivalent: the `users` table you'd create with `php artisan make:auth`.
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String?  @map("password_hash")
-  username     String   @unique
-  name         String?
-  googleId     String?  @unique @map("google_id")
-  countryCode  String?  @map("country_code")
-  role         UserRole @default(USER)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String?  @map("password_hash")
+  username      String   @unique
+  name          String?
+  googleId      String?  @unique @map("google_id")
+  countryCode   String?  @map("country_code")
+  role          UserRole @default(USER)
+  referrerId    String?  @map("referrer_id")
+  referralCode  String?  @unique @map("referral_code")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relations
-  wallet         Wallet?
-  squads         Squad[]
+  wallet        Wallet?
+  squads        Squad[]
   createdLeagues League[]       @relation("LeagueCreator")
-  memberships    LeagueMember[]
-  transactions   Transaction[]
+  memberships   LeagueMember[]
+  transactions  Transaction[]
+  referrer      User?          @relation("UserReferrals", fields: [referrerId], references: [id])
+  referrees     User[]         @relation("UserReferrals")
 
   @@map("users")
 }
