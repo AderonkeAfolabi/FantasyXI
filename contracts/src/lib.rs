@@ -861,7 +861,7 @@ mod test {
 
     #[test]
     fn test_ttl_extensions() {
-        let (env, admin, token_addr, client) = setup_test();
+        let (env, _admin, _token_addr, client) = setup_test();
         let creator = Address::generate(&env);
 
         client.create_league(&creator, &800, &50_000_000, &token_addr);
