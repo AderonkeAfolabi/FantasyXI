@@ -38,12 +38,9 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Run cargo build
-        env:
-          RUSTFLAGS: ""
-          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: "-C target-feature=-reference-types"
         run: |
           cargo build --verbose
-          cargo build --target wasm32-unknown-unknown --release --verbose
+          RUSTFLAGS="-C target-feature=-reference-types" cargo build --target wasm32-unknown-unknown --release --verbose
 
       - name: Run cargo test
         run: cargo test --verbose
