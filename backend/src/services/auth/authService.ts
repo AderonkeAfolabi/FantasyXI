@@ -7,6 +7,7 @@ import {
   LoginInput,
   SafeUser,
   AuthResult,
+  UserRole,
 } from "../../types/index.js";
 
 /**
@@ -52,6 +53,7 @@ export function toSafeUser(user: {
   email: string;
   username: string;
   name?: string | null;
+  role?: UserRole | string | null;
   createdAt: Date;
   updatedAt: Date;
 }): SafeUser {
@@ -60,6 +62,7 @@ export function toSafeUser(user: {
     email: user.email,
     username: user.username,
     name: user.name ?? null,
+    role: (user.role as UserRole | undefined) ?? UserRole.USER,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -191,6 +194,7 @@ export class AuthService {
       userId: user.id,
       email: user.email,
       username: user.username,
+      role: user.role ?? UserRole.USER,
     });
 
     return {
@@ -234,6 +238,7 @@ export class AuthService {
       userId: user.id,
       email: user.email,
       username: user.username,
+      role: user.role ?? UserRole.USER,
     });
 
     return {
@@ -281,6 +286,7 @@ export class AuthService {
         userId: user.id,
         email: user.email,
         username: user.username,
+        role: user.role ?? UserRole.USER,
       });
       return { user: safeUser, token };
     }
@@ -340,6 +346,7 @@ export class AuthService {
       userId: user.id,
       email: user.email,
       username: user.username,
+      role: user.role ?? UserRole.USER,
     });
 
     return {

@@ -89,6 +89,14 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       const a = { ...clone[idxA] };
       const b = { ...clone[idxB] };
 
+      // GKP can only swap with GKP
+      const aIsGkp = a.player.position === Position.GKP;
+      const bIsGkp = b.player.position === Position.GKP;
+      if (aIsGkp !== bIsGkp) {
+        alert("Goalkeepers can only be swapped with other Goalkeepers.");
+        return { players: prev };
+      }
+
       const tempStarter = a.isStarter;
       const tempOrder = a.positionOrder;
 
@@ -117,6 +125,22 @@ export const useTeamStore = create<TeamState>((set, get) => ({
 
       clone[idxA] = a;
       clone[idxB] = b;
+
+      // Validate new formation if we swapped a starter with a bench player
+      if (tempStarter !== b.isStarter) {
+        // Need to import validateFormation and count starters dynamically. 
+        // We will inline the validation logic for Outfields here since we don't have access to validateFormation import easily inside the store without adding the import.
+        const newStarters = clone.filter(p => p.isStarter);
+        const def = newStarters.filter(p => p.player.position === Position.DEF).length;
+        const mid = newStarters.filter(p => p.player.position === Position.MID).length;
+        const fwd = newStarters.filter(p => p.player.position === Position.FWD).length;
+        
+        if (def < 3 || def > 5 || mid < 2 || mid > 5 || fwd < 1 || fwd > 3) {
+          alert(`Invalid Formation: This substitution would result in an invalid formation (${def}-${mid}-${fwd}).`);
+          return { players: prev };
+        }
+      }
+
       return { players: clone };
     });
   },

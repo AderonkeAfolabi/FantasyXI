@@ -1,5 +1,6 @@
 import { prisma } from "../../config/db.js";
 import { fplClient } from "./fplClient.js";
+import crypto from "crypto";
 import {
   normalizeTeam,
   normalizePlayer,
@@ -7,6 +8,17 @@ import {
   normalizeFixture,
   normalizePlayerStats,
 } from "./fplNormalizer.js";
+
+function generateHash(payload: any): string {
+  const normalized = JSON.stringify(payload, (key, value) => {
+    if (value instanceof Date) return value.getTime();
+    if (value !== null && typeof value === "object" && typeof value.toNumber === "function") {
+      return value.toNumber(); // Prisma Decimal
+    }
+    return value;
+  });
+  return crypto.createHash("sha256").update(normalized).digest("hex");
+}
 
 /**
  * FPL Data Synchronization Service.
@@ -45,38 +57,62 @@ export class FplSyncService {
 
     // 1. Sync Teams
     console.log(`Synchronizing ${raw.teams.length} teams...`);
-    const teamPromises = raw.teams.map((rawTeam) => {
+    const existingTeams = await prisma.team.findMany();
+    const existingTeamHashes = new Map(
+      existingTeams.map(t => [
+        t.fplId, 
+        generateHash({
+          name: t.name,
+          shortName: t.shortName,
+          logoUrl: t.logoUrl,
+          strength: t.strength,
+          strengthOverallHome: t.strengthOverallHome,
+          strengthOverallAway: t.strengthOverallAway,
+          strengthAttackHome: t.strengthAttackHome,
+          strengthAttackAway: t.strengthAttackAway,
+          strengthDefenceHome: t.strengthDefenceHome,
+          strengthDefenceAway: t.strengthDefenceAway,
+        })
+      ])
+    );
+
+    const teamOps = [];
+    for (const rawTeam of raw.teams) {
       const team = normalizeTeam(rawTeam);
-      return prisma.team.upsert({
-        where: { fplId: team.fplId },
-        update: {
-          name: team.name,
-          shortName: team.shortName,
-          logoUrl: team.logoUrl,
-          strength: team.strength,
-          strengthOverallHome: team.strengthOverallHome,
-          strengthOverallAway: team.strengthOverallAway,
-          strengthAttackHome: team.strengthAttackHome,
-          strengthAttackAway: team.strengthAttackAway,
-          strengthDefenceHome: team.strengthDefenceHome,
-          strengthDefenceAway: team.strengthDefenceAway,
-        },
-        create: {
-          fplId: team.fplId,
-          name: team.name,
-          shortName: team.shortName,
-          logoUrl: team.logoUrl,
-          strength: team.strength,
-          strengthOverallHome: team.strengthOverallHome,
-          strengthOverallAway: team.strengthOverallAway,
-          strengthAttackHome: team.strengthAttackHome,
-          strengthAttackAway: team.strengthAttackAway,
-          strengthDefenceHome: team.strengthDefenceHome,
-          strengthDefenceAway: team.strengthDefenceAway,
-        },
-      });
-    });
-    const syncedTeams = await Promise.all(teamPromises);
+      const payload = {
+        name: team.name,
+        shortName: team.shortName,
+        logoUrl: team.logoUrl,
+        strength: team.strength,
+        strengthOverallHome: team.strengthOverallHome,
+        strengthOverallAway: team.strengthOverallAway,
+        strengthAttackHome: team.strengthAttackHome,
+        strengthAttackAway: team.strengthAttackAway,
+        strengthDefenceHome: team.strengthDefenceHome,
+        strengthDefenceAway: team.strengthDefenceAway,
+      };
+
+      const incomingHash = generateHash(payload);
+      const existingHash = existingTeamHashes.get(team.fplId);
+
+      if (incomingHash !== existingHash) {
+        teamOps.push(
+          prisma.team.upsert({
+            where: { fplId: team.fplId },
+            update: payload,
+            create: { fplId: team.fplId, ...payload },
+          })
+        );
+      }
+    }
+
+    if (teamOps.length > 0) {
+      console.log(`Executing ${teamOps.length} team updates...`);
+      await prisma.$transaction(teamOps);
+    }
+    
+    // Fetch all teams again to build the map for players
+    const syncedTeams = await prisma.team.findMany();
 
     // Build map of team FPL ID -> Local Database ID
     const teamMap = new Map<number, number>();
@@ -86,32 +122,84 @@ export class FplSyncService {
 
     // 2. Sync Gameweeks
     console.log(`Synchronizing ${raw.events.length} gameweeks...`);
-    const gwPromises = raw.events.map((rawEvent) => {
+    const existingGameweeks = await prisma.gameweek.findMany();
+    const existingGwHashes = new Map(
+      existingGameweeks.map(gw => [
+        gw.fplId,
+        generateHash({
+          name: gw.name,
+          deadline: gw.deadline,
+          isCurrent: gw.isCurrent,
+          isFinished: gw.isFinished,
+          season: gw.season,
+        })
+      ])
+    );
+
+    const gwOps = [];
+    for (const rawEvent of raw.events) {
       const gw = normalizeGameweek(rawEvent);
-      return prisma.gameweek.upsert({
-        where: { fplId: gw.fplId },
-        update: {
-          name: gw.name,
-          deadline: gw.deadline,
-          isCurrent: gw.isCurrent,
-          isFinished: gw.isFinished,
-          season: gw.season,
-        },
-        create: {
-          fplId: gw.fplId,
-          name: gw.name,
-          deadline: gw.deadline,
-          isCurrent: gw.isCurrent,
-          isFinished: gw.isFinished,
-          season: gw.season,
-        },
-      });
-    });
-    const syncedGameweeks = await Promise.all(gwPromises);
+      const payload = {
+        name: gw.name,
+        deadline: gw.deadline,
+        isCurrent: gw.isCurrent,
+        isFinished: gw.isFinished,
+        season: gw.season,
+      };
+
+      const incomingHash = generateHash(payload);
+      const existingHash = existingGwHashes.get(gw.fplId);
+
+      if (incomingHash !== existingHash) {
+        gwOps.push(
+          prisma.gameweek.upsert({
+            where: { fplId: gw.fplId },
+            update: payload,
+            create: { fplId: gw.fplId, ...payload },
+          })
+        );
+      }
+    }
+
+    if (gwOps.length > 0) {
+      console.log(`Executing ${gwOps.length} gameweek updates...`);
+      await prisma.$transaction(gwOps);
+    }
+    
+    const syncedGameweeks = await prisma.gameweek.findMany();
 
     // 3. Sync Players
     console.log(`Synchronizing ${raw.elements.length} players...`);
+    const existingPlayers = await prisma.player.findMany();
+    const existingPlayerHashes = new Map(
+      existingPlayers.map(p => [
+        p.fplId,
+        generateHash({
+          firstName: p.firstName,
+          lastName: p.lastName,
+          displayName: p.displayName,
+          position: p.position,
+          teamId: p.teamId,
+          price: p.price,
+          totalPoints: p.totalPoints,
+          minutesPlayed: p.minutesPlayed,
+          goalsScored: p.goalsScored,
+          assists: p.assists,
+          cleanSheets: p.cleanSheets,
+          form: p.form,
+          status: p.status,
+          news: p.news,
+          chanceOfPlayingNextRound: p.chanceOfPlayingNextRound,
+          selectedByPercent: p.selectedByPercent,
+          photoUrl: p.photoUrl,
+          isAvailable: p.isAvailable,
+        })
+      ])
+    );
+
     let playersCount = 0;
+    const playerOps = [];
+    
     for (const rawPlayer of raw.elements) {
       const localTeamId = teamMap.get(rawPlayer.team);
       if (!localTeamId) {
@@ -120,52 +208,51 @@ export class FplSyncService {
       }
 
       const p = normalizePlayer(rawPlayer);
+      const payload = {
+        firstName: p.firstName,
+        lastName: p.lastName,
+        displayName: p.displayName,
+        position: p.position,
+        teamId: localTeamId,
+        price: p.price,
+        totalPoints: p.totalPoints,
+        minutesPlayed: p.minutesPlayed,
+        goalsScored: p.goalsScored,
+        assists: p.assists,
+        cleanSheets: p.cleanSheets,
+        form: p.form,
+        status: p.status,
+        news: p.news,
+        chanceOfPlayingNextRound: p.chanceOfPlayingNextRound,
+        selectedByPercent: p.selectedByPercent,
+        photoUrl: p.photoUrl,
+        isAvailable: p.isAvailable,
+      };
 
-      await prisma.player.upsert({
-        where: { fplId: p.fplId },
-        update: {
-          firstName: p.firstName,
-          lastName: p.lastName,
-          displayName: p.displayName,
-          position: p.position,
-          teamId: localTeamId,
-          price: p.price,
-          totalPoints: p.totalPoints,
-          minutesPlayed: p.minutesPlayed,
-          goalsScored: p.goalsScored,
-          assists: p.assists,
-          cleanSheets: p.cleanSheets,
-          form: p.form,
-          status: p.status,
-          news: p.news,
-          chanceOfPlayingNextRound: p.chanceOfPlayingNextRound,
-          selectedByPercent: p.selectedByPercent,
-          photoUrl: p.photoUrl,
-          isAvailable: p.isAvailable,
-        },
-        create: {
-          fplId: p.fplId,
-          firstName: p.firstName,
-          lastName: p.lastName,
-          displayName: p.displayName,
-          position: p.position,
-          teamId: localTeamId,
-          price: p.price,
-          totalPoints: p.totalPoints,
-          minutesPlayed: p.minutesPlayed,
-          goalsScored: p.goalsScored,
-          assists: p.assists,
-          cleanSheets: p.cleanSheets,
-          form: p.form,
-          status: p.status,
-          news: p.news,
-          chanceOfPlayingNextRound: p.chanceOfPlayingNextRound,
-          selectedByPercent: p.selectedByPercent,
-          photoUrl: p.photoUrl,
-          isAvailable: p.isAvailable,
-        },
-      });
-      playersCount++;
+      const incomingHash = generateHash(payload);
+      const existingHash = existingPlayerHashes.get(p.fplId);
+
+      if (incomingHash !== existingHash) {
+        playerOps.push(
+          prisma.player.upsert({
+            where: { fplId: p.fplId },
+            update: payload,
+            create: { fplId: p.fplId, ...payload },
+          })
+        );
+        playersCount++;
+
+        // Batch execution for Players (chunk of 100)
+        if (playerOps.length >= 100) {
+          await prisma.$transaction(playerOps);
+          playerOps.length = 0;
+        }
+      }
+    }
+
+    // Flush remaining players
+    if (playerOps.length > 0) {
+      await prisma.$transaction(playerOps);
     }
 
     console.log(
@@ -195,7 +282,27 @@ export class FplSyncService {
     });
     const gwMap = new Map<number, number>(gameweeks.map((g) => [g.fplId, g.id]));
 
+    const existingFixtures = await prisma.fixture.findMany();
+    const existingFixtureHashes = new Map(
+      existingFixtures.map(f => [
+        f.fplId,
+        generateHash({
+          gameweekId: f.gameweekId,
+          homeTeamId: f.homeTeamId,
+          awayTeamId: f.awayTeamId,
+          kickoffTime: f.kickoffTime,
+          started: f.started,
+          finished: f.finished,
+          homeScore: f.homeScore,
+          awayScore: f.awayScore,
+          minutes: f.minutes,
+        })
+      ])
+    );
+
     let fixturesCount = 0;
+    const fixtureOps = [];
+    
     for (const raw of rawFixtures) {
       const homeTeamId = teamMap.get(raw.team_h);
       const awayTeamId = teamMap.get(raw.team_a);
@@ -206,34 +313,40 @@ export class FplSyncService {
 
       const gameweekId = raw.event ? gwMap.get(raw.event) ?? null : null;
       const f = normalizeFixture(raw);
+      const payload = {
+        gameweekId,
+        homeTeamId,
+        awayTeamId,
+        kickoffTime: f.kickoffTime,
+        started: f.started,
+        finished: f.finished,
+        homeScore: f.homeScore,
+        awayScore: f.awayScore,
+        minutes: f.minutes,
+      };
 
-      await prisma.fixture.upsert({
-        where: { fplId: f.fplId },
-        update: {
-          gameweekId,
-          homeTeamId,
-          awayTeamId,
-          kickoffTime: f.kickoffTime,
-          started: f.started,
-          finished: f.finished,
-          homeScore: f.homeScore,
-          awayScore: f.awayScore,
-          minutes: f.minutes,
-        },
-        create: {
-          fplId: f.fplId,
-          gameweekId,
-          homeTeamId,
-          awayTeamId,
-          kickoffTime: f.kickoffTime,
-          started: f.started,
-          finished: f.finished,
-          homeScore: f.homeScore,
-          awayScore: f.awayScore,
-          minutes: f.minutes,
-        },
-      });
-      fixturesCount++;
+      const incomingHash = generateHash(payload);
+      const existingHash = existingFixtureHashes.get(f.fplId);
+
+      if (incomingHash !== existingHash) {
+        fixtureOps.push(
+          prisma.fixture.upsert({
+            where: { fplId: f.fplId },
+            update: payload,
+            create: { fplId: f.fplId, ...payload },
+          })
+        );
+        fixturesCount++;
+        
+        if (fixtureOps.length >= 100) {
+          await prisma.$transaction(fixtureOps);
+          fixtureOps.length = 0;
+        }
+      }
+    }
+
+    if (fixtureOps.length > 0) {
+      await prisma.$transaction(fixtureOps);
     }
 
     console.log(`✅ FPL Fixtures sync complete: ${fixturesCount} fixtures.`);
@@ -261,7 +374,29 @@ export class FplSyncService {
     });
     const playerMap = new Map<number, number>(players.map((p) => [p.fplId, p.id]));
 
+    const existingStats = await prisma.playerGameweekStats.findMany({
+      where: { gameweekId: gameweek.id }
+    });
+    const existingStatsHashes = new Map(
+      existingStats.map(s => [
+        s.playerId,
+        generateHash({
+          minutes: s.minutes,
+          goals: s.goals,
+          assists: s.assists,
+          cleanSheet: s.cleanSheet,
+          yellowCards: s.yellowCards,
+          redCards: s.redCards,
+          saves: s.saves,
+          bonus: s.bonus,
+          totalPoints: s.totalPoints,
+        })
+      ])
+    );
+
     let statsCount = 0;
+    const statsOps = [];
+    
     for (const rawElement of liveData.elements) {
       const localPlayerId = playerMap.get(rawElement.id);
       if (!localPlayerId) {
@@ -269,40 +404,49 @@ export class FplSyncService {
       }
 
       const stats = normalizePlayerStats(rawElement);
+      const payload = {
+        minutes: stats.minutes,
+        goals: stats.goals,
+        assists: stats.assists,
+        cleanSheet: stats.cleanSheet,
+        yellowCards: stats.yellowCards,
+        redCards: stats.redCards,
+        saves: stats.saves,
+        bonus: stats.bonus,
+        totalPoints: stats.totalPoints,
+      };
 
-      await prisma.playerGameweekStats.upsert({
-        where: {
-          playerId_gameweekId: {
-            playerId: localPlayerId,
-            gameweekId: gameweek.id,
-          },
-        },
-        update: {
-          minutes: stats.minutes,
-          goals: stats.goals,
-          assists: stats.assists,
-          cleanSheet: stats.cleanSheet,
-          yellowCards: stats.yellowCards,
-          redCards: stats.redCards,
-          saves: stats.saves,
-          bonus: stats.bonus,
-          totalPoints: stats.totalPoints,
-        },
-        create: {
-          playerId: localPlayerId,
-          gameweekId: gameweek.id,
-          minutes: stats.minutes,
-          goals: stats.goals,
-          assists: stats.assists,
-          cleanSheet: stats.cleanSheet,
-          yellowCards: stats.yellowCards,
-          redCards: stats.redCards,
-          saves: stats.saves,
-          bonus: stats.bonus,
-          totalPoints: stats.totalPoints,
-        },
-      });
-      statsCount++;
+      const incomingHash = generateHash(payload);
+      const existingHash = existingStatsHashes.get(localPlayerId);
+
+      if (incomingHash !== existingHash) {
+        statsOps.push(
+          prisma.playerGameweekStats.upsert({
+            where: {
+              playerId_gameweekId: {
+                playerId: localPlayerId,
+                gameweekId: gameweek.id,
+              },
+            },
+            update: payload,
+            create: {
+              playerId: localPlayerId,
+              gameweekId: gameweek.id,
+              ...payload,
+            },
+          })
+        );
+        statsCount++;
+        
+        if (statsOps.length >= 100) {
+          await prisma.$transaction(statsOps);
+          statsOps.length = 0;
+        }
+      }
+    }
+
+    if (statsOps.length > 0) {
+      await prisma.$transaction(statsOps);
     }
 
     console.log(

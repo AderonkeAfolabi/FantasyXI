@@ -19,8 +19,19 @@ import {
 } from "@/components/ui/Icons";
 import { Button } from "@/components/ui/Button";
 import { PositionBadge } from "@/components/ui/Badge";
+import {
+  DndContext,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+} from "@dnd-kit/core";
 
 import { useTeamStore, LocalSquadPlayer } from "@/store/teamStore";
+import { PlayerCard } from "@/components/pitch/PlayerCard";
 
 export default function TeamPage() {
   const router = useRouter();
@@ -110,6 +121,46 @@ export default function TeamPage() {
 
   // Selected player object
   const selectedPlayer = players.find((p) => p.playerId === selectedPlayerId);
+
+  // DND Handlers
+  const [activeDragPlayer, setActiveDragPlayer] = useState<LocalSquadPlayer | null>(null);
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 10,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250,
+        tolerance: 5,
+      },
+    })
+  );
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event;
+    const player = players.find((p) => p.playerId === active.id);
+    if (player) {
+      setActiveDragPlayer(player);
+    }
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setActiveDragPlayer(null);
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const activeIdNum = Number(active.id);
+      const overIdNum = Number(over.id);
+      
+      if (!isNaN(activeIdNum) && !isNaN(overIdNum)) {
+        handleSwap(activeIdNum, overIdNum);
+      }
+      setSelectedPlayerId(null);
+    }
+  };
 
   // Auto-pick balanced squad logic
   const handleAutoPick = async () => {
@@ -360,171 +411,188 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Top Header & Squad Name */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-pitch-surface border border-pitch-border p-5 rounded-xl shadow-md">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-              Tactical Pitch
-            </span>
-            <span className="text-xs font-mono text-slate-500">&bull; Gameweek Lineup</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <input
-              type="text"
-              value={squadName}
-              onChange={(e) => setSquadName(e.target.value)}
-              placeholder="My Fantasy XI"
-              className="text-xl sm:text-2xl font-black text-white bg-transparent border-b border-dashed border-slate-700 hover:border-emerald-400 focus:border-emerald-400 focus:outline-none uppercase tracking-tight"
-            />
-          </div>
-        </div>
-
-        {/* Formation & Rules status */}
-        <div className="flex items-center gap-2 text-xs font-mono">
-          <span className="text-slate-400 uppercase tracking-wider text-[11px]">Formation</span>
-          <span className="text-emerald-400 font-bold text-sm">
-            {detectFormation(starters as any)}
-          </span>
-        </div>
-      </div>
-
-      {/* Notifications */}
-      {saveSuccessMsg && (
-        <div className="p-3.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 flex items-center gap-3 text-emerald-300 text-xs animate-fadeIn">
-          <IconCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          <span className="font-semibold">{saveSuccessMsg}</span>
-        </div>
-      )}
-
-      {errorMessage && (
-        <div className="p-3.5 rounded-lg bg-rose-950/40 border border-rose-500/40 flex items-center gap-3 text-rose-300 text-xs animate-shake">
-          <IconAlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-          <span className="font-semibold">{errorMessage}</span>
-        </div>
-      )}
-
-      {/* Budget & Squad Constraints Bar */}
-      <BudgetBar
-        onAutoPick={handleAutoPick}
-        onReset={() => {
-          setPlayers([]);
-          setSelectedPlayerId(null);
-        }}
-        isSaving={isSaving}
-        onSave={handleSaveSquad}
-        canSave={canSave}
-      />
-
-      {/* Validation Errors Pill if invalid */}
-      {!validation.valid && validation.errors.length > 0 && (
-        <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-500/30 text-amber-300 text-xs space-y-1">
-          <div className="font-bold uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
-            <IconAlertCircle className="w-3.5 h-3.5" />
-            <span>Lineup Constraints Checklist</span>
-          </div>
-          <ul className="list-disc list-inside space-y-0.5 text-slate-300">
-            {validation.errors.map((err, i) => (
-              <li key={i}>{err}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Contextual Action Bar when player is clicked */}
-      {selectedPlayer && (
-        <div className="p-3.5 rounded-xl bg-slate-900 border border-emerald-500/50 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
-          <div className="flex items-center gap-3">
-            <PositionBadge position={selectedPlayer.player.position} size="md" />
-            <div>
-              <div className="text-xs font-bold text-white">
-                {selectedPlayer.player.displayName} ({selectedPlayer.player.team?.shortName || "PL"})
-              </div>
-              <div className="text-[11px] text-slate-400 font-mono">
-                £{(selectedPlayer.player.price / 10).toFixed(1)}m &bull; {selectedPlayer.player.totalPoints} pts &bull;{" "}
-                {selectedPlayer.isStarter ? "Starter" : "Sub"}
-              </div>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="space-y-6 pb-12">
+        {/* Top Header & Squad Name */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-pitch-surface border border-pitch-border p-5 rounded-xl shadow-md">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                Tactical Pitch
+              </span>
+              <span className="text-xs font-mono text-slate-500">&bull; Gameweek Lineup</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                value={squadName}
+                onChange={(e) => setSquadName(e.target.value)}
+                placeholder="My Fantasy XI"
+                className="text-xl sm:text-2xl font-black text-white bg-transparent border-b border-dashed border-slate-700 hover:border-emerald-400 focus:border-emerald-400 focus:outline-none uppercase tracking-tight"
+              />
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {selectedPlayer.isStarter && (
-              <>
-                <Button
-                  type="button"
-                  variant={selectedPlayer.isCaptain ? "primary" : "secondary"}
-                  size="sm"
-                  onClick={() => handleSetCaptain(selectedPlayer.playerId)}
-                  className="text-xs font-bold"
-                >
-                  (C) Captain
-                </Button>
-
-                <Button
-                  type="button"
-                  variant={selectedPlayer.isViceCaptain ? "primary" : "secondary"}
-                  size="sm"
-                  onClick={() => handleSetViceCaptain(selectedPlayer.playerId)}
-                  className="text-xs font-bold"
-                >
-                  (V) Vice
-                </Button>
-              </>
-            )}
-
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setActiveModalState({
-                  isOpen: true,
-                  requiredPosition: selectedPlayer.player.position,
-                  replacingPlayer: selectedPlayer.player,
-                });
-              }}
-              className="text-xs"
-            >
-              Transfer Out
-            </Button>
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedPlayerId(null)}
-              className="text-xs text-slate-400"
-            >
-              Deselect
-            </Button>
+          {/* Formation & Rules status */}
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="text-slate-400 uppercase tracking-wider text-[11px]">Formation</span>
+            <span className="text-emerald-400 font-bold text-sm">
+              {detectFormation(starters as any)}
+            </span>
           </div>
         </div>
-      )}
 
-      {/* Main Pitch View */}
-      <Pitch />
+        {/* Notifications */}
+        {saveSuccessMsg && (
+          <div className="p-3.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 flex items-center gap-3 text-emerald-300 text-xs animate-fadeIn">
+            <IconCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span className="font-semibold">{saveSuccessMsg}</span>
+          </div>
+        )}
 
-      {/* Dugout Substitute Bench */}
-      <Bench />
+        {errorMessage && (
+          <div className="p-3.5 rounded-lg bg-rose-950/40 border border-rose-500/40 flex items-center gap-3 text-rose-300 text-xs animate-shake">
+            <IconAlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+            <span className="font-semibold">{errorMessage}</span>
+          </div>
+        )}
 
-      {/* Transfer & Player Picker Modal */}
-      <PlayerPickerModal
-        isOpen={activeModalState.isOpen}
-        onClose={() =>
-          setActiveModalState({
-            isOpen: false,
-            requiredPosition: null,
-            replacingPlayer: null,
-          })
-        }
-        requiredPosition={activeModalState.requiredPosition}
-        currentSquadPlayerIds={players.map((p) => p.playerId)}
-        clubCounts={clubCounts}
-        remainingBudget={remainingBudgetTenths}
-        replacingPlayer={activeModalState.replacingPlayer}
-        onSelectPlayer={handleReplacePlayer}
-      />
-    </div>
+        {/* Budget & Squad Constraints Bar */}
+        <BudgetBar
+          onAutoPick={handleAutoPick}
+          onReset={() => {
+            setPlayers([]);
+            setSelectedPlayerId(null);
+          }}
+          isSaving={isSaving}
+          onSave={handleSaveSquad}
+          canSave={canSave}
+        />
+
+        {/* Validation Errors Pill if invalid */}
+        {!validation.valid && validation.errors.length > 0 && (
+          <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-500/30 text-amber-300 text-xs space-y-1">
+            <div className="font-bold uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
+              <IconAlertCircle className="w-3.5 h-3.5" />
+              <span>Lineup Constraints Checklist</span>
+            </div>
+            <ul className="list-disc list-inside space-y-0.5 text-slate-300">
+              {validation.errors.map((err, i) => (
+                <li key={i}>{err}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Action Modal when player is clicked */}
+        {selectedPlayer && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-0 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-slate-900 border border-emerald-500/50 shadow-2xl rounded-2xl w-full max-w-sm overflow-hidden animate-slideUp sm:animate-zoomIn">
+              <div className="p-5 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50">
+                <PositionBadge position={selectedPlayer.player.position} size="md" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-base font-black text-white truncate uppercase">
+                    {selectedPlayer.player.displayName}
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono mt-0.5">
+                    {selectedPlayer.player.team?.shortName || "PL"} &bull; £{(selectedPlayer.player.price / 10).toFixed(1)}m &bull; {selectedPlayer.player.totalPoints} pts
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 grid gap-2">
+                {selectedPlayer.isStarter && (
+                  <>
+                    <Button
+                      type="button"
+                      variant={selectedPlayer.isCaptain ? "primary" : "secondary"}
+                      size="md"
+                      onClick={() => { handleSetCaptain(selectedPlayer.playerId); setSelectedPlayerId(null); }}
+                      className="w-full justify-start text-sm font-bold"
+                    >
+                      (C) Make Captain
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={selectedPlayer.isViceCaptain ? "primary" : "secondary"}
+                      size="md"
+                      onClick={() => { handleSetViceCaptain(selectedPlayer.playerId); setSelectedPlayerId(null); }}
+                      className="w-full justify-start text-sm font-bold"
+                    >
+                      (V) Make Vice-Captain
+                    </Button>
+                  </>
+                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  onClick={() => {
+                    setActiveModalState({
+                      isOpen: true,
+                      requiredPosition: selectedPlayer.player.position,
+                      replacingPlayer: selectedPlayer.player,
+                    });
+                    setSelectedPlayerId(null);
+                  }}
+                  className="w-full justify-start text-sm"
+                >
+                  <IconSwap className="w-4 h-4 mr-2 opacity-70" /> Transfer Out
+                </Button>
+              </div>
+              <div className="p-3 bg-slate-950 border-t border-slate-800">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="md"
+                  onClick={() => setSelectedPlayerId(null)}
+                  className="w-full text-slate-400 hover:text-white"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Main Pitch View */}
+        <Pitch />
+
+        {/* Dugout Substitute Bench */}
+        <Bench />
+
+        {/* Transfer & Player Picker Modal */}
+        <PlayerPickerModal
+          isOpen={activeModalState.isOpen}
+          onClose={() =>
+            setActiveModalState({
+              isOpen: false,
+              requiredPosition: null,
+              replacingPlayer: null,
+            })
+          }
+          requiredPosition={activeModalState.requiredPosition}
+          currentSquadPlayerIds={players.map((p) => p.playerId)}
+          clubCounts={clubCounts}
+          remainingBudget={remainingBudgetTenths}
+          replacingPlayer={activeModalState.replacingPlayer}
+          onSelectPlayer={handleReplacePlayer}
+        />
+      </div>
+
+      <DragOverlay dropAnimation={null}>
+        {activeDragPlayer ? (
+          <div className="scale-110 opacity-90 shadow-2xl drop-shadow-[0_0_15px_rgba(52,211,153,0.5)] cursor-grabbing z-50">
+            <PlayerCard
+              player={activeDragPlayer.player}
+              positionSlot={activeDragPlayer.player.position}
+              isStarter={activeDragPlayer.isStarter}
+              isCaptain={activeDragPlayer.isCaptain}
+              isViceCaptain={activeDragPlayer.isViceCaptain}
+              isOverlay={true}
+            />
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }

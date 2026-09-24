@@ -10,7 +10,8 @@ import {
   cancelLeague,
   streamLeagueLive,
 } from "../controllers/league.controller.js";
-import { requireAuth } from "../middleware/authMiddleware.js";
+import { requireAuth, requireRole } from "../middleware/authMiddleware.js";
+import { UserRole } from "../types/index.js";
 
 const router = Router();
 
@@ -58,7 +59,12 @@ router.get("/:leagueId/payment-requirement", requireAuth, getPaymentRequirement)
 router.post("/:leagueId/submit-payment", requireAuth, submitPayment);
 router.post("/:leagueId/verify-payment", requireAuth, verifyPayment);
 router.get("/:leagueId/settlement-plan", requireAuth, getSettlementPlan);
-router.get("/:leagueId/reconcile", requireAuth, reconcileLeague);
+router.get(
+  "/:leagueId/reconcile",
+  requireAuth,
+  requireRole(UserRole.ADMIN, UserRole.MODERATOR),
+  reconcileLeague
+);
 
 export default router;
 
