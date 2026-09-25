@@ -15,6 +15,7 @@ import {
 import { StandingsTable } from "@/components/leagues/StandingsTable";
 import { PrizeCalculator } from "@/components/leagues/PrizeCalculator";
 import { PaymentModal } from "@/components/leagues/PaymentModal";
+import { InvitationManager } from "@/components/leagues/InvitationManager";
 import { getOnChainLeague, OnChainLeagueState } from "@/lib/stellar/sorobanAudit";
 import { LiveMatchdayBar } from "@/components/live/LiveMatchdayBar";
 import { LiveSquadModal } from "@/components/live/LiveSquadModal";
@@ -220,6 +221,7 @@ export default function LeagueDetailPage({
   const myEntry = user ? standings.find((s) => s.userId === user.id) : null;
   const isMember = !!myEntry;
   const hasPaid = myEntry?.membershipStatus === MembershipStatus.ACTIVE || league?.entryFee === 0;
+  const isCreator = !!user && league?.creatorId === user.id;
 
   if (isLoading) {
     return (
@@ -268,6 +270,12 @@ export default function LeagueDetailPage({
           <div>
             <div className="flex items-center gap-2 mb-1.5">
               <LeagueStatusBadge status={league.status} />
+              {league.isPrivate && (
+                <Badge variant="neutral" className="gap-1">
+                  <IconShield className="w-3 h-3" />
+                  <span>Private</span>
+                </Badge>
+              )}
               <span className="text-xs font-mono text-slate-400">
                 GW {league.startGameweekId} &rarr; GW {league.endGameweekId}
               </span>
@@ -280,25 +288,27 @@ export default function LeagueDetailPage({
             </p>
           </div>
 
-          {/* Invite Code Widget */}
-          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 self-start md:self-auto">
-            <div>
-              <div className="text-[10px] uppercase font-semibold text-slate-500">Invite Code</div>
-              <div className="font-mono font-bold text-white tracking-widest text-sm">
-                {league.inviteCode}
+          {/* Invite Code Widget (private league codes are only returned to the creator) */}
+          {league.inviteCode && (
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 self-start md:self-auto">
+              <div>
+                <div className="text-[10px] uppercase font-semibold text-slate-500">Invite Code</div>
+                <div className="font-mono font-bold text-white tracking-widest text-sm">
+                  {league.inviteCode}
+                </div>
               </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={copyInviteCode}
+                className="text-xs"
+                title="Copy Invite Code"
+              >
+                {copiedCode ? <IconCheck className="w-3.5 h-3.5 text-emerald-400" /> : <IconCopy className="w-3.5 h-3.5" />}
+              </Button>
             </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={copyInviteCode}
-              className="text-xs"
-              title="Copy Invite Code"
-            >
-              {copiedCode ? <IconCheck className="w-3.5 h-3.5 text-emerald-400" /> : <IconCopy className="w-3.5 h-3.5" />}
-            </Button>
-          </div>
+          )}
         </div>
 
         {/* 4 Stats Grid */}
@@ -355,6 +365,10 @@ export default function LeagueDetailPage({
                   </Badge>
                 )}
               </div>
+            ) : league.isPrivate ? (
+              <span className="text-xs text-slate-400">
+                This is a private league. Ask the creator for an invitation link to join.
+              </span>
             ) : (
               <div className="flex items-center gap-3">
                 <span className="text-xs font-semibold text-slate-300">Enter with Squad:</span>
@@ -396,7 +410,7 @@ export default function LeagueDetailPage({
               >
                 Pay {league.entryFee} USDC Entry Fee
               </Button>
-            ) : !isMember ? (
+            ) : !isMember && !league.isPrivate ? (
               <Button
                 type="button"
                 variant="primary"
@@ -466,6 +480,10 @@ export default function LeagueDetailPage({
 
         {/* Right 1 Col: Prize Payout Calculator & Rules */}
         <div className="space-y-6">
+          {league.isPrivate && isCreator && league.status === LeagueStatus.UPCOMING && (
+            <InvitationManager leagueId={league.id} />
+          )}
+
           <PrizeCalculator entryFee={league.entryFee} participants={league.currentMembers || league.maxMembers} />
 
           {league.entryFee > 0 && (
