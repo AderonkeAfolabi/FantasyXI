@@ -77,6 +77,9 @@ pub enum DataKey {
     ClaimablePrize(u64, Address),
 }
 
+/// # Issue #83: Soroban Escrow Smart Contract for Fantasy Leagues
+/// Provides non-custodial holding of USDC entry fee deposits for competition partitions.
+/// Ensures trustless settlement, prize claim storage, and refund mechanisms.
 #[contract]
 pub struct FantasyXIEscrow;
 
